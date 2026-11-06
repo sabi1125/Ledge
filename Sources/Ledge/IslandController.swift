@@ -154,48 +154,37 @@ final class IslandController {
         if !isHidden { panel?.orderFrontRegardless() }
     }
 
-    /// Hidden while something is full screen on this screen (floating pills only).
+    /// Hidden while something is full screen on this screen. Only used when pinning to
+    /// desktops isn't available; with pinning, macOS itself keeps the pill off full-screen desktops.
     private(set) var isSuppressed = false
-    /// Hidden for a moment while macOS switches Spaces (going full screen, leaving it, or
-    /// swiping between desktops), so the pill never flashes onto the new view.
-    private var isPausedForSwitch = false
-    private var switchTimer: Timer?
-    private var isHidden: Bool { isSuppressed || isPausedForSwitch }
+    private var isHidden: Bool { isSuppressed }
+    private var loggedPin = false
 
     func setSuppressed(_ hidden: Bool) {
-        guard hidden != isSuppressed else { return }
+        guard hidden != isSuppressed, let panel else { return }
         isSuppressed = hidden
-        applyVisibility()
-    }
-
-    /// Called the moment a Space switch starts; the pill comes back once it has settled.
-    func pauseForSpaceSwitch(_ seconds: TimeInterval = 0.5) {
-        isPausedForSwitch = true
-        applyVisibility()
-        switchTimer?.invalidate()
-        switchTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.isPausedForSwitch = false
-                self?.applyVisibility()
-            }
+        if hidden {
+            if model.isExpanded { model.close() }
+            panel.ignoresMouseEvents = true
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
         }
     }
 
-    /// Hides at once (no flash), and fades back in gently.
-    private func applyVisibility() {
+    /// Keeps the pill off this screen's full-screen desktops. The pill stays an "all desktops"
+    /// window, so it stays perfectly still when you swipe between normal desktops; macOS just
+    /// leaves it out of the full-screen ones, including while you swipe into them.
+    func keepOff(fullScreen spaces: Spaces.DisplaySpaces) {
         guard let panel else { return }
-        if isHidden {
-            if model.isExpanded { model.close() }
-            panel.ignoresMouseEvents = true
-            panel.alphaValue = 0
-            panel.orderOut(nil)
-        } else if !panel.isVisible || panel.alphaValue < 1 {
-            panel.alphaValue = 0
-            panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.25
-                panel.animator().alphaValue = 1
-            }
+        let current = Spaces.spaces(ofWindow: panel.windowNumber)
+        let onFullScreen = current.filter { spaces.fullScreen.contains($0) }
+        let missingNormal = spaces.normal.filter { !current.contains($0) }
+        guard !onFullScreen.isEmpty || !missingNormal.isEmpty else { return }
+        Spaces.pin(window: panel.windowNumber, to: missingNormal, removeFrom: onFullScreen)
+        if !loggedPin || !onFullScreen.isEmpty {
+            loggedPin = true
+            LedgeLog.shared.write("spaces: pill on display \(displayID) taken off full-screen desktops \(onFullScreen); now on \(Spaces.spaces(ofWindow: panel.windowNumber))")
         }
     }
 

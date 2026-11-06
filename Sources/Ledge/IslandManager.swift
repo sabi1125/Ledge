@@ -28,18 +28,9 @@ final class IslandManager {
     func start() {
         media.islands = { [weak self] in self?.models ?? [] }
         sync()
-        // While an app or video is full screen on a screen, that screen's pill steps aside.
-        fullScreen.onChange = { [weak self] _ in self?.applyFullScreen() }
+        // Keep each pill on its screen's normal desktops only (see FullScreenWatcher).
+        fullScreen.onChange = { [weak self] in self?.applyFullScreen() }
         fullScreen.start()
-        // The moment macOS switches Spaces (into or out of full screen, or between desktops),
-        // pills step aside so they never flash onto the new view.
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                for c in self.controllers.values where c.model.style == .floating { c.pauseForSpaceSwitch() }
-            }
-            .store(in: &cancellables)
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.sync() }
@@ -71,7 +62,7 @@ final class IslandManager {
                                                   openSettings: openSettings)
                 controllers[id] = controller
                 controller.start(on: screen)
-                if model.style == .floating && fullScreen.fullScreenDisplays.contains(id) { controller.setSuppressed(true) }
+                if model.style == .floating { apply(fullScreenRulesTo: controller) }
                 media.sync(model)
                 LedgeLog.shared.write("islands: added \(model.style == .notch ? "notch island" : "floating pill") on display \(id)")
             }
@@ -83,9 +74,16 @@ final class IslandManager {
         }
     }
 
-    /// A pill hides only while its own screen has something full screen.
     private func applyFullScreen() {
-        for c in controllers.values where c.model.style == .floating {
+        for c in controllers.values where c.model.style == .floating { apply(fullScreenRulesTo: c) }
+    }
+
+    /// Pins a pill to its screen's normal desktops, so it's simply absent from full-screen ones.
+    /// If pinning isn't available, it hides while its screen shows a full-screen desktop instead.
+    private func apply(fullScreenRulesTo c: IslandController) {
+        if Spaces.canPin, let spaces = Spaces.spaces(for: c.displayID, in: fullScreen.spaces) {
+            c.keepOff(fullScreen: spaces)
+        } else {
             c.setSuppressed(fullScreen.fullScreenDisplays.contains(c.displayID))
         }
     }

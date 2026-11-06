@@ -11,6 +11,10 @@ A personal, Alcove-style notch app for your MacBook Pro. It's for your own use o
 - **Notes:** click and type. It saves automatically to `~/Library/Application Support/Ledge/Notes.txt`. The island stays open while you type. Press **Esc** or click elsewhere to close it.
 - **Indicators:** volume, brightness, plugging in the charger, and low battery (20%, 10%, 5%) all show in the notch.
 - **Settings and quit:** right-click the notch. Opening Ledge again from Applications or Spotlight also opens settings.
+## External displays
+
+Screens without a notch get a floating pill at the top center, like the original iPhone Dynamic Island. It has the same features and stays visible on normal desktops. It's kept off full-screen desktops (apps and videos) at the macOS level, so it never flickers when you swipe. Turn it off with "Show Ledge on other displays" in settings.
+
 ## Clean menu bar
 
 Menu bar icons are removed in **System Settings → Menu Bar** (there's a button in Ledge's settings). Turn off every app, and for Apple's icons, keep only **Wi-Fi** and **Battery**. This removes them completely.
