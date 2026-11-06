@@ -1,0 +1,138 @@
+import AppKit
+import Carbon
+import Combine
+import LedgeCore
+import SwiftUI
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let model = IslandModel()
+    private lazy var media = MediaController(model: model)
+    private let calendar = CalendarStore()
+    private let notes = NotesStore()
+    private lazy var island = IslandController(model: model, calendar: calendar, notes: notes) { [weak self] in
+        self?.showSettings()
+    }
+    private let volume = VolumeMonitor()
+    private let brightness = BrightnessMonitor()
+    private let battery = BatteryMonitor()
+    private let hider = MenuBarHider()
+    private let keys = MediaKeyInterceptor()
+    private let settingsState = SettingsState()
+    private var settingsWindow: NSWindow?
+    private var revealHotKey: HotKey?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Pref.registerDefaults()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        LedgeLog.shared.write("Ledge \(version) started")
+
+        model.onCommand = { [weak self] in self?.media.send($0) }
+        island.start()
+        media.start()
+
+        volume.onChange = { [weak self] level, muted in
+            guard Pref.bool(Pref.showVolume) else { return }
+            self?.model.show(.volume(level: level, muted: muted))
+        }
+        volume.start()
+
+        brightness.displayID = {
+            let screen = IslandController.notchedScreen() ?? NSScreen.main
+            let number = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+            return number.map { CGDirectDisplayID($0.uint32Value) } ?? CGMainDisplayID()
+        }
+        brightness.onChange = { [weak self] level in
+            guard Pref.bool(Pref.showBrightness) else { return }
+            self?.model.show(.brightness(level: level))
+        }
+        brightness.start()
+
+        battery.onEvent = { [weak self] event in
+            guard Pref.bool(Pref.showBattery) else { return }
+            switch event {
+            case let .pluggedIn(p): self?.model.show(.charging(percent: p))
+            case let .low(p): self?.model.show(.lowBattery(percent: p))
+            }
+        }
+        battery.start()
+
+        // Handle the volume and brightness keys ourselves, so only Ledge's indicator shows.
+        keys.onKey = { [weak self] key, fine in
+            MainActor.assumeIsolated {
+                guard let self else { return false }
+                switch key {
+                case .volumeUp, .volumeDown, .mute:
+                    guard Pref.bool(Pref.showVolume), self.volume.canControl else { return false }
+                    if key == .mute { self.volume.toggleMute() }
+                    else { self.volume.step(up: key == .volumeUp, fine: fine) }
+                    return true
+                case .brightnessUp, .brightnessDown:
+                    guard Pref.bool(Pref.showBrightness), self.brightness.canControl else { return false }
+                    self.brightness.step(up: key == .brightnessUp, fine: fine)
+                    return true
+                }
+            }
+        }
+        keys.start()
+        if !AXIsProcessTrusted() {
+            // Ask once per launch; each new build of Ledge needs a fresh grant.
+            let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+        }
+
+        hider.onStatusChange = { [weak self] status in self?.settingsState.hiderStatus = status }
+        settingsState.onHideIconsChanged = { [weak self] on in self?.hider.apply(enabled: on) }
+        settingsState.requestAccessibility = { [weak self] in self?.hider.requestPermission() }
+        settingsState.revealIcons = { [weak self] in self?.hider.reveal() }
+        if Pref.bool(Pref.hideMenuBarIcons) {
+            // Give other apps a moment to add their icons after login.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.hider.start()
+                // Ask on every launch until granted (each rebuild needs a fresh grant).
+                if self?.hider.status == .needsPermission {
+                    self?.hider.requestPermission()
+                }
+                UserDefaults.standard.set(true, forKey: Pref.didFirstLaunch)
+            }
+        }
+
+        // ⌃⌥⌘M shows hidden menu bar icons for a few seconds.
+        revealHotKey = HotKey(keyCode: kVK_ANSI_M, modifiers: controlKey | optionKey | cmdKey, id: 1) { [weak self] in
+            self?.hider.reveal()
+        }
+
+        if !Pref.bool(Pref.didFirstLaunch), !LoginItem.isEnabled {
+            LoginItem.set(true) // start at login by default
+            settingsState.launchAtLogin = LoginItem.isEnabled
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        notes.saveNow()
+        media.stop()
+        hider.stop()
+    }
+
+    /// Opening Ledge again (e.g. from Applications or Spotlight) shows its settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return true
+    }
+
+    func showSettings() {
+        settingsState.launchAtLogin = LoginItem.isEnabled
+        settingsState.hiderStatus = hider.status
+        if settingsWindow == nil {
+            let host = NSHostingController(rootView: SettingsView(state: settingsState))
+            let window = NSWindow(contentViewController: host)
+            window.title = "Ledge Settings"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+}

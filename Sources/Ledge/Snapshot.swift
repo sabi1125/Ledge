@@ -1,0 +1,89 @@
+import AppKit
+import LedgeCore
+import SwiftUI
+
+/// `Ledge --snapshot DIR` draws every island state to PNGs, so the look can be
+/// checked without screen recording. Uses sample data, not your real music.
+@MainActor
+enum Snapshot {
+    static func render(to dir: String) {
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        Pref.registerDefaults()
+        let notch = NotchMetrics(width: 185, height: 32)
+        let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
+            ("1-idle", .idle, nil, false, .music),
+            ("2-compact", .compact, nil, true, .music),
+            ("3-expanded", .expanded, nil, true, .music),
+            ("4-expanded-paused", .expanded, nil, false, .music),
+            ("5-volume", .hud, .volume(level: 0.62, muted: false), false, .music),
+            ("6-brightness", .hud, .brightness(level: 0.8), false, .music),
+            ("7-charging", .hud, .charging(percent: 82), false, .music),
+            ("8-low-battery", .hud, .lowBattery(percent: 10), false, .music),
+            ("9-calendar", .expanded, nil, true, .calendar),
+            ("10-notes", .expanded, nil, true, .notes),
+            ("11-notes-empty", .expanded, nil, true, .notes),
+        ]
+        let now = Date()
+        let cal = Calendar.current
+        let at = { (h: Int, m: Int, day: Int) -> Date in
+            cal.date(bySettingHour: h, minute: m, second: 0, of: cal.date(byAdding: .day, value: day, to: now)!)!
+        }
+        let sampleEvents = [
+            CalendarItem(id: "1", title: "Design review", start: now.addingTimeInterval(-600), end: now.addingTimeInterval(1200),
+                         isAllDay: false, color: .orange, joinURL: URL(string: "https://meet.google.com/abc-defg-hij")),
+            CalendarItem(id: "2", title: "Lunch with Mina", start: now.addingTimeInterval(1500), end: now.addingTimeInterval(4800),
+                         isAllDay: false, color: .green, joinURL: nil),
+            CalendarItem(id: "3", title: "Team standup", start: at(9, 30, 1), end: at(9, 45, 1),
+                         isAllDay: false, color: .blue, joinURL: URL(string: "https://acme.zoom.us/j/123")),
+            CalendarItem(id: "4", title: "Dentist", start: at(16, 0, 1), end: at(17, 0, 1),
+                         isAllDay: false, color: .purple, joinURL: nil),
+        ]
+        for (name, shape, hud, playing, page) in cases {
+            let calendarStore = CalendarStore()
+            calendarStore.useSample(sampleEvents)
+            let notesStore = NotesStore(sample: name == "10-notes"
+                ? "Buy oat milk\nCall the landlord about the heater\nIdea: notch timer for pomodoros"
+                : "")
+            let model = IslandModel()
+            model.notch = notch
+            var media = NowPlayingState()
+            media.title = "Golden Hour Drive"
+            media.artist = "Sunline"
+            media.duration = 228
+            media.elapsed = 96
+            media.isPlaying = playing
+            media.timestamp = Date()
+            model.media = media
+            model.setArtwork(sampleArtwork().tiffRepresentation)
+            model.forceShape(shape, hud: hud, page: page)
+
+            let panel = IslandLayout.panelSize(notch: notch)
+            let view = ZStack(alignment: .top) {
+                LinearGradient(colors: [Color(red: 0.14, green: 0.11, blue: 0.31), Color(red: 0.42, green: 0.29, blue: 0.66)],
+                               startPoint: .top, endPoint: .bottom)
+                // Menu bar strip, for context.
+                Color.white.opacity(0.06).frame(height: notch.height)
+                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, openSettings: {})
+            }
+            .frame(width: panel.width, height: panel.height)
+
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2
+            if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+            }
+        }
+    }
+
+    private static func sampleArtwork() -> NSImage {
+        let size = NSSize(width: 300, height: 300)
+        return NSImage(size: size, flipped: false) { rect in
+            NSGradient(colors: [NSColor(srgbRed: 0.97, green: 0.75, blue: 0.54, alpha: 1),
+                                NSColor(srgbRed: 0.89, green: 0.45, blue: 0.48, alpha: 1),
+                                NSColor(srgbRed: 0.48, green: 0.25, blue: 0.56, alpha: 1)])!
+                .draw(in: rect, angle: -45)
+            return true
+        }
+    }
+}

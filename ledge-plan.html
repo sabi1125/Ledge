@@ -1,0 +1,419 @@
+<title>Ledge Build Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the "look" section breaks wider into a grid of laptop-screen mockups, with the expanded player spanning the full width. */
+:root {
+  --bg: #eef0f4;
+  --surface: #ffffff;
+  --ink: #141821;
+  --muted: #586073;
+  --line: #d8dce5;
+  --accent: #2f55d4;
+  --accent-soft: #e3e9fb;
+  --hw: #000000;           /* the notch is always pure black hardware */
+  --hw-ink: #f4f5f7;
+  --hw-dim: #8b909c;
+  --hw-track: #2b2d34;
+  --tint: #f19a76;         /* color pulled from the album art */
+  --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-body: "Figtree", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1015; --surface: #161922; --ink: #e7e9ef; --muted: #9aa1b3;
+    --line: #2a2f3b; --accent: #8fa6ff; --accent-soft: #1d2440; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1015; --surface: #161922; --ink: #e7e9ef; --muted: #9aa1b3;
+  --line: #2a2f3b; --accent: #8fa6ff; --accent-soft: #1d2440; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 48px 80px;
+}
+.wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-size: 1.1rem; font-weight: 500; }
+p { margin: 0; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 1.15rem; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 20px; }
+.muted { color: var(--muted); }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+
+header { display: flex; flex-direction: column; gap: 16px; }
+.answer { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; font-size: 1.05rem; }
+
+/* ---------- Mockups ---------- */
+.shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px; }
+.shots .span { grid-column: 1 / -1; }
+@media (max-width: 720px) { .shots { grid-template-columns: minmax(0, 1fr); } }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+figcaption { display: flex; flex-direction: column; gap: 2px; }
+figcaption strong { font-weight: 600; }
+figcaption span { color: var(--muted); font-size: 0.93rem; }
+
+.screen {
+  container-type: inline-size;
+  position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 6.6;
+  border-radius: 14px; overflow: hidden;
+  background:
+    radial-gradient(110% 90% at 80% 115%, #b0517e 0%, transparent 55%),
+    radial-gradient(90% 80% at 5% 100%, #2f2a6e 0%, transparent 60%),
+    linear-gradient(165deg, #241b4f 0%, #43308a 45%, #6b4aa8 100%);
+  border: 6px solid #1b1c20;
+}
+.span .screen { aspect-ratio: 16 / 5.2; }
+.menubar {
+  position: absolute; inset: 0 0 auto 0; height: 4.4cqw;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2.2cqw; color: #f4f5f7; font-size: 1.7cqw; font-weight: 500;
+}
+.menubar .l, .menubar .r { display: flex; gap: 2.2cqw; align-items: center; }
+.menubar .r { gap: 1.8cqw; }
+.mb { width: 1.9cqw; height: 1.9cqw; color: #f4f5f7; flex: none; }
+.mb.wide { width: 2.9cqw; }
+.span .mb { width: 1.45cqw; height: 1.45cqw; }
+.span .mb.wide { width: 2.2cqw; }
+.span .menubar { height: 3.4cqw; font-size: 1.3cqw; }
+
+/* The island: a black pill grown out of the notch, rounder than the hardware */
+.isle {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 22cqw; height: 4.4cqw;
+  background: var(--hw); color: var(--hw-ink);
+  border-radius: 0 0 1.8cqw 1.8cqw;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 1.2cqw; font-size: 1.6cqw;
+}
+.isle.compact { width: 30cqw; }
+.isle.hud { width: 34cqw; }
+.isle.open {
+  width: 46cqw; height: auto; border-radius: 0 0 3cqw 3cqw;
+  flex-direction: column; align-items: stretch; justify-content: flex-start;
+  padding: 1.6cqw 2.2cqw 2cqw; gap: 1.3cqw; font-size: 1.2cqw;
+  box-shadow: 0 1.4cqw 4cqw rgba(0,0,0,.4);
+}
+
+.art { flex: none; background: linear-gradient(135deg, #f6c08a, #e2737a 50%, #7b3f8f); }
+.art.sm { width: 2.5cqw; height: 2.5cqw; border-radius: 0.7cqw; }
+.art.lg { width: 7.6cqw; height: 7.6cqw; border-radius: 1.4cqw; }
+
+.wave { display: flex; gap: 0.3cqw; align-items: center; height: 2.2cqw; }
+.wave i { width: 0.38cqw; border-radius: 0.3cqw; background: var(--tint); animation: wave 0.9s ease-in-out infinite; }
+.wave i:nth-child(1) { height: 35%; animation-delay: -.15s; }
+.wave i:nth-child(2) { height: 80%; animation-delay: -.45s; }
+.wave i:nth-child(3) { height: 55%; animation-delay: -.7s; }
+.wave i:nth-child(4) { height: 95%; animation-delay: -.3s; }
+.wave i:nth-child(5) { height: 45%; animation-delay: -.55s; }
+.open .wave { height: 2.4cqw; gap: 0.32cqw; }
+.open .wave i { width: 0.34cqw; }
+@keyframes wave { 0%,100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .wave i { animation: none; } }
+
+.top { display: flex; align-items: center; gap: 1.4cqw; }
+.meta { display: flex; flex-direction: column; gap: 0.2cqw; flex: 1; min-width: 0; }
+.meta .t { font-size: 1.55cqw; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .a { font-size: 1.3cqw; color: var(--hw-dim); }
+.prog { display: flex; align-items: center; gap: 1cqw; font-family: var(--font-mono); font-size: 0.95cqw; color: var(--hw-dim); }
+.bar { flex: 1; height: 0.5cqw; border-radius: 1cqw; background: var(--hw-track); position: relative; }
+.bar::after { content: ""; position: absolute; inset: 0 58% 0 0; background: var(--hw-ink); border-radius: inherit; }
+.ctrls { display: flex; justify-content: center; gap: 4cqw; align-items: center; }
+.ctrls svg { width: 2cqw; height: 2cqw; fill: var(--hw-ink); }
+.ctrls svg.big { width: 2.6cqw; height: 2.6cqw; }
+
+.ico { width: 2.1cqw; height: 2.1cqw; fill: var(--hw-ink); flex: none; }
+.level { width: 12cqw; height: 0.6cqw; border-radius: 1cqw; background: var(--hw-track); position: relative; }
+.level::after { content: ""; position: absolute; inset: 0 var(--off, 35%) 0 0; background: var(--hw-ink); border-radius: inherit; }
+.green { color: #5fd38a; }
+.batt { display: flex; align-items: center; gap: 0.8cqw; font-family: var(--font-mono); font-size: 1.5cqw; }
+.batt i { width: 4cqw; height: 1.9cqw; border: 0.22cqw solid #5fd38a; border-radius: 0.55cqw; position: relative; display: block; }
+.batt i::after { content: ""; position: absolute; inset: 0.22cqw 0.75cqw 0.22cqw 0.22cqw; background: #5fd38a; border-radius: 0.25cqw; }
+
+/* ---------- Milestones ---------- */
+.milestones { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.ms { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 20px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.ms .n { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); padding-top: 4px; }
+.ms .n b { display: block; font-family: var(--font-display); font-size: 1.9rem; color: var(--accent); font-weight: 700; line-height: 1; margin-bottom: 4px; }
+.ms ul { margin: 8px 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 4px; }
+.ms .check { margin-top: 12px; font-size: 0.92rem; background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; }
+.ms .check b { font-weight: 600; }
+@media (max-width: 560px) { .ms { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+ul.plain { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 8px; }
+
+.scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 640px) { .scope { grid-template-columns: minmax(0, 1fr); } }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.box.in { border-color: var(--accent); }
+
+/* ---------- Tables ---------- */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.95rem; }
+th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+th { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 500; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+
+/* ---------- Workflow ---------- */
+.loop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.95rem; }
+.loop span { background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 4px 14px; }
+.loop em { font-style: normal; color: var(--muted); }
+
+.risks { display: flex; flex-direction: column; gap: 14px; }
+.risk { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 16px; }
+.pill { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; border-radius: 99px; padding: 3px 10px; align-self: start; text-align: center; background: var(--pill-bg); color: var(--pill-fg); }
+.pill.med { --pill-bg: #fbe7c6; --pill-fg: #7a4a00; }
+.pill.low { --pill-bg: #d8f0e0; --pill-fg: #1d5b33; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.med { --pill-bg: #3b2c10; --pill-fg: #f3c879; } :root:not([data-theme="light"]) .pill.low { --pill-bg: #13301f; --pill-fg: #8fdcab; } }
+:root[data-theme="dark"] .pill.med { --pill-bg: #3b2c10; --pill-fg: #f3c879; }
+:root[data-theme="dark"] .pill.low { --pill-bg: #13301f; --pill-fg: #8fdcab; }
+@media (max-width: 520px) { .risk { grid-template-columns: minmax(0, 1fr); gap: 6px; } .pill { justify-self: start; } }
+</style>
+
+<div class="wrap">
+
+<header class="col">
+  <div class="eyebrow">Personal Mac app · build plan · v4</div>
+  <h1>Ledge, an Alcove-style notch for your MacBook Pro</h1>
+  <p class="lede">It uses the same look as Alcove: a small black island that grows out of the notch to show your music, volume and charging, then melts back in. It has fewer features and is built only for you.</p>
+  <p class="answer"><strong>Who builds it?</strong> AI does all of it. I write the code, build it, test it and install it, and you try each version and tell me how it feels. We match Alcove's look by designing it ourselves, so nothing is copied from their app, and since it's never released, that's fine for personal use.</p>
+</header>
+
+<section>
+  <div class="col stack">
+    <div class="eyebrow">How it will look</div>
+    <h2>Five island states and a clean menu bar</h2>
+    <p class="muted">Pure black, rounded, and only a little wider than the notch until you open it. Colors in the player come from the album art. The song name is an example.</p>
+  </div>
+  <div class="shots">
+    <figure>
+      <div class="screen" role="img" aria-label="Idle: the notch looks normal">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span><span>Edit</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle"></div>
+      </div>
+      <figcaption><strong>Idle</strong><span>Nothing playing, so it looks exactly like the normal notch.</span></figcaption>
+    </figure>
+
+    <figure>
+      <div class="screen" role="img" aria-label="Compact: small album art on the left, colored waveform on the right">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle compact"><span class="art sm"></span><span class="wave"><i></i><i></i><i></i><i></i><i></i></span></div>
+      </div>
+      <figcaption><strong>Music playing</strong><span>Grows just a bit wider: album art on the left, a waveform in the album's color on the right.</span></figcaption>
+    </figure>
+
+    <figure class="span">
+      <div class="screen" role="img" aria-label="Expanded player with album art, title, artist, waveform, progress bar and controls">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle open">
+          <div class="top">
+            <span class="art lg"></span>
+            <div class="meta"><div class="t">Golden Hour Drive</div><div class="a">Sunline</div></div>
+            <span class="wave"><i></i><i></i><i></i><i></i><i></i></span>
+          </div>
+          <div class="prog"><span>1:36</span><span class="bar"></span><span>-2:12</span></div>
+          <div class="ctrls">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6v12L3 12zM20 6v12l-8-6z"/></svg>
+            <svg class="big" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 6v12l8-6zM4 6v12l8-6z"/></svg>
+          </div>
+        </div>
+      </div>
+      <figcaption><strong>Hover or click to open</strong><span>The island drops down into a full player: big album art, song and artist, a live waveform, a scrub bar, and play controls. Swipe left or right on it to skip.</span></figcaption>
+    </figure>
+
+    <figure>
+      <div class="screen" role="img" aria-label="Volume indicator inside the island">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle hud">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.2-1.2a3.3 3.3 0 0 0 0-4.6zM18.6 6a8.6 8.6 0 0 1 0 12l-1.2-1.2a6.9 6.9 0 0 0 0-9.6z"/></svg>
+          <span class="level"></span>
+        </div>
+      </div>
+      <figcaption><strong>Volume and brightness</strong><span>Pressing the keys shows a slim level bar in the island instead of the big box in the middle of the screen.</span></figcaption>
+    </figure>
+
+    <figure>
+      <div class="screen" role="img" aria-label="Charging indicator showing 82 percent">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle hud">
+          <span class="green" style="font-weight:600">Charging</span>
+          <span class="batt"><span class="green">82%</span><i></i></span>
+        </div>
+      </div>
+      <figcaption><strong>Plug in</strong><span>A quick green charging pop with the battery level, then it shrinks back.</span></figcaption>
+    </figure>
+
+    <figure class="span">
+      <div class="screen" role="img" aria-label="Clean menu bar: only Wi-Fi, battery, Control Center and the date and time on the right">
+        <div class="menubar"><div class="l"><span></span><span>Finder</span><span>File</span><span>Edit</span><span>View</span></div><div class="r"><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 10a11.5 11.5 0 0 1 16 0M7.2 13.4a7 7 0 0 1 9.6 0"/><circle cx="12" cy="17.4" r="1.7" fill="currentColor" stroke="none"/></svg><svg class="mb wide" viewBox="0 0 30 16" aria-hidden="true"><rect x="1" y="2" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3.2" y="4.2" width="15" height="7.6" rx="1.8" fill="currentColor"/><path d="M27.5 6v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="mb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="3.5"/><rect x="3" y="13" width="18" height="7" rx="3.5"/><circle cx="16.5" cy="7.5" r="1.8" fill="currentColor"/><circle cx="7.5" cy="16.5" r="1.8" fill="currentColor"/></svg><span>Fri 6 Nov 11:42</span></div></div>
+        <div class="isle"></div>
+      </div>
+      <figcaption><strong>Your clean menu bar</strong><span>The right side shows only Wi-Fi, battery, Control Center, and the date and time. No other app icons, ever.</span></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">What's in, what's out</div>
+  <h2>A smaller app that does a few things well</h2>
+  <div class="scope">
+    <div class="box in">
+      <h3>Building</h3>
+      <ul class="plain">
+        <li>The Alcove-style island with smooth, springy animations</li>
+        <li>Now playing: compact view and full player</li>
+        <li>Swipe to skip tracks</li>
+        <li>Volume, brightness and charging indicators</li>
+        <li>Start at login, hide in full screen</li>
+        <li>A clean menu bar: only Wi-Fi, battery, Control Center and the date and time on the right</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Leaving out for now</h3>
+      <ul class="plain">
+        <li>Notifications in the island</li>
+        <li>Lock screen widgets</li>
+        <li>Calendar, file shelf, timers</li>
+        <li>Lots of settings and themes</li>
+      </ul>
+      <p class="muted" style="font-size:.92rem">Any of these can be added later if you miss them.</p>
+    </div>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">What we'll build, in order</div>
+  <h2>Five milestones</h2>
+  <p class="muted">Each one ends with a version you can install and use. You check it before I start the next.</p>
+  <div class="milestones">
+    <div class="ms">
+      <div class="n"><b>1</b>Island</div>
+      <div>
+        <h3>The island itself</h3>
+        <ul>
+          <li>A black island that sits exactly on your notch</li>
+          <li>Opens on hover or click with a springy animation, and closes when you move away</li>
+          <li>Short hover delay so it doesn't open when you just reach for the menu bar</li>
+          <li>Hides in full-screen apps and only appears on the screen with the notch</li>
+        </ul>
+        <p class="check"><b>You check:</b> does it feel like Alcove when it opens and closes?</p>
+      </div>
+    </div>
+    <div class="ms">
+      <div class="n"><b>2</b>Music</div>
+      <div>
+        <h3>Now playing</h3>
+        <ul>
+          <li>Compact view with album art and a colored waveform whenever something plays</li>
+          <li>Full player with title, artist, scrub bar and controls</li>
+          <li>Swipe on the island to skip or go back</li>
+          <li>Works with Apple Music, Spotify and browsers, meaning anything that shows in Control Center</li>
+        </ul>
+        <p class="check"><b>You check:</b> play music from the apps you use and see whether it always shows up.</p>
+      </div>
+    </div>
+    <div class="ms">
+      <div class="n"><b>3</b>Indicators</div>
+      <div>
+        <h3>Volume, brightness, charging</h3>
+        <ul>
+          <li>Slim level bar when you press the volume or brightness keys</li>
+          <li>Charging pop when you plug in, and a low-battery warning</li>
+        </ul>
+        <p class="check"><b>You check:</b> press the keys and plug in the charger.</p>
+      </div>
+    </div>
+    <div class="ms">
+      <div class="n"><b>4</b>Finish</div>
+      <div>
+        <h3>Make it a real app</h3>
+        <ul>
+          <li>Installed in Applications with its own icon, starts at login, no Dock icon</li>
+          <li>Small settings window (on/off for each feature)</li>
+          <li>Battery and CPU check so it stays light</li>
+          <li>One-command update script</li>
+        </ul>
+        <p class="check"><b>You check:</b> use it for a week, and anything that bugs you goes on the fix list.</p>
+      </div>
+    </div>
+    <div class="ms">
+      <div class="n"><b>5</b>Menu bar</div>
+      <div>
+        <h3>Clean up the top right</h3>
+        <ul>
+          <li>Turn off Apple's extra icons (Bluetooth, sound, Focus, Spotlight, Siri and so on) using the Menu Bar page in System Settings. I'll give you the exact switches.</li>
+          <li>No third-party icons on the right, ever. Ledge hides every other app's icon, and the apps keep running normally in the background</li>
+          <li>Apps you install later get hidden automatically, so you never have to clean up again</li>
+          <li>If you ever need one of those apps' menus, a keyboard shortcut shows the hidden icons for a few seconds and then hides them again</li>
+          <li>Bluetooth, sound and Focus are still one click away in Control Center</li>
+          <li>Right side ends up as: Wi-Fi, battery, Control Center, date and time, and nothing else</li>
+        </ul>
+        <p class="check"><b>You check:</b> is the right side clean, and does the shortcut bring icons back when you need them?</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="col stack">
+    <div class="eyebrow">How it's made</div>
+    <h2>The technical side</h2>
+    <p class="muted">You don't need to follow this part. It's here so you can see the approach.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Part</th><th>What we use</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Language</td><td>Swift 6.4 with SwiftUI and AppKit</td><td>Apple's own tools, already installed on your Mac with Xcode 27.2</td></tr>
+        <tr><td>The island</td><td>A floating panel above the menu bar, sized from the screen's notch measurements</td><td>Fits your notch exactly</td></tr>
+        <tr><td>Animations</td><td>SwiftUI spring animations, all using one shared timing</td><td>This is what gives Alcove its smooth, liquid feel</td></tr>
+        <tr><td>Building</td><td>Swift package plus a build script that makes <span class="mono">Ledge.app</span></td><td>I build and run everything from the terminal, so you never open Xcode</td></tr>
+        <tr><td>Installing</td><td>Script copies the app to Applications and signs it for your Mac</td><td>Opens like any app, with no developer account needed</td></tr>
+        <tr><td>Music info</td><td>macOS media system (the one Control Center uses), with Apple Music and Spotify as backups</td><td>Covers every app that plays audio</td></tr>
+        <tr><td>Indicators</td><td>macOS audio, display and battery notifications</td><td>Updates instantly, with no polling</td></tr>
+        <tr><td>Menu bar apps</td><td>The same hiding trick Ice and Bartender use</td><td>Other apps' icons stay working, just out of sight</td></tr>
+        <tr><td>Testing</td><td>Automated tests for the logic, plus me running the app after each change</td><td>Catches breakage before you see it</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">How we'll work</div>
+  <h2>I build, you check</h2>
+  <div class="loop" aria-label="Work loop">
+    <span>I build a milestone</span><em>→</em><span>I test it</span><em>→</em><span>You try it</span><em>→</em><span>I fix what you report</span><em>→</em><span>Next milestone</span>
+  </div>
+  <p class="muted">The only things you'll need to do: try each version, click Allow on the occasional macOS prompt, approve the commands I run, and pick a folder to keep the project in.</p>
+</section>
+
+<section class="col">
+  <div class="eyebrow">Things to know up front</div>
+  <h2>Limits and risks</h2>
+  <div class="risks">
+    <div class="risk"><span class="pill med">Medium</span><p><strong>Music info relies on a hidden macOS feature.</strong> Apple has locked it down in recent versions. We'll use the workaround other notch apps use, with Apple Music and Spotify as a backup. A future macOS update could break it, and then I'd update the code.</p></div>
+    <div class="risk"><span class="pill med">Medium</span><p><strong>The normal volume pop-up may still appear.</strong> macOS doesn't let apps reliably hide its own volume and brightness display, so both might show for a moment.</p></div>
+    <div class="risk"><span class="pill med">Medium</span><p><strong>The Control Center icon can't be removed.</strong> macOS doesn't allow hiding it, so the top right will be Wi-Fi, battery, Control Center and the date and time. That was true as of macOS 26, and I'll check whether 27 changed it. Hiding other apps' icons can also break after macOS updates, and I'd fix it when it does.</p></div>
+    <div class="risk"><span class="pill low">Low</span><p><strong>Privacy dots still appear.</strong> The small orange, green or purple dot that macOS shows while your microphone, camera or screen recording is in use can't be hidden by any app. It only shows while something is recording.</p></div>
+    <div class="risk"><span class="pill low">Low</span><p><strong>Matching the feel takes tuning.</strong> I can build the look and take screenshots, but I can't feel the animation. Expect a round or two of "faster, bouncier" from you.</p></div>
+    <div class="risk"><span class="pill low">Low</span><p><strong>The project needs a permanent home.</strong> This chat uses a temporary folder. Before coding starts, we'll move to a folder you pick, such as Developer/Ledge.</p></div>
+  </div>
+</section>
+
+</div>
