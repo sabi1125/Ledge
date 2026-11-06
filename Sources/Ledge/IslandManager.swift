@@ -126,6 +126,12 @@ final class IslandManager {
     /// Debug only: plays a style's open and close on the notch while recording it.
     func debugRecord(style: String, to dir: String) {
         guard let c = controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return }
+        if style == "hud" {
+            // A volume pop, as if the key was pressed.
+            c.recordFrames(to: dir, seconds: 2.4, every: 0.025)
+            c.model.show(.volume(level: 0.62, muted: false))
+            return
+        }
         UserDefaults.standard.set(style, forKey: IslandAnimation.key)
         c.recordFrames(to: dir)
         c.model.previewAnimation()

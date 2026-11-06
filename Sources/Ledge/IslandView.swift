@@ -533,7 +533,7 @@ struct LevelBar: View {
                     .frame(width: max(0, min(1, level)) * geo.size.width)
             }
         }
-        .animation(Theme.quick, value: level)
+        .animation(Theme.level, value: level)
     }
 }
 

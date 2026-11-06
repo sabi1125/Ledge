@@ -9,8 +9,10 @@ enum Theme {
     static let contentIn = Animation.easeOut(duration: 0.22).delay(0.1)
     static let contentOut = Animation.easeOut(duration: 0.14)
     static let quick = Animation.spring(response: 0.3, dampingFraction: 0.86)
-    /// A bouncier spring for indicators popping down out of the notch.
-    static let pop = Animation.spring(response: 0.38, dampingFraction: 0.64, blendDuration: 0)
+    /// Indicators popping down out of the notch: quick, and stopping exactly at their size.
+    static let pop = Animation.spring(response: 0.32, dampingFraction: 1, blendDuration: 0)
+    /// The level bar following key presses: smooth, no overshoot.
+    static let level = Animation.smooth(duration: 0.16)
 
     static let defaultTint = Color(red: 0.95, green: 0.60, blue: 0.46)
     static let secondaryText = Color(white: 0.58)
