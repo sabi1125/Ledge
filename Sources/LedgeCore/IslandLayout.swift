@@ -81,7 +81,7 @@ public enum IslandLayout {
             case .hover:
                 return CGSize(width: notch.width + 18, height: notch.height + 4)
             case .compact:
-                return CGSize(width: notch.width + compactWing * 2, height: notch.height)
+                return CGSize(width: compactWidth ?? (notch.width + compactWing * 2), height: notch.height)
             case .hud:
                 return CGSize(width: notch.width + hudWing * 2, height: notch.height + hudBody)
             case .expanded:

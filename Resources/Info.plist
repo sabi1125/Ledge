@@ -2,32 +2,32 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>Ledge</string>
 	<key>CFBundleDisplayName</key>
 	<string>Ledge</string>
-	<key>CFBundleIdentifier</key>
-	<string>local.sabir.ledge</string>
 	<key>CFBundleExecutable</key>
 	<string>Ledge</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.sabir.ledge</string>
+	<key>CFBundleName</key>
+	<string>Ledge</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1</string>
+	<string>1.2</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>15.0</string>
 	<key>LSUIElement</key>
-	<true/>
-	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Ledge shows your upcoming events in the notch.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Ledge shows your upcoming events in the notch.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Personal build. Not for distribution.</string>
 </dict>

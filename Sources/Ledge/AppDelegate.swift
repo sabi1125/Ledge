@@ -9,8 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let media = MediaController()
     private let calendar = CalendarStore()
     private let notes = NotesStore()
+    private let timer = TimerStore()
+    private let updater = Updater()
     /// One island per screen: the notch on the MacBook, a floating pill on other displays.
-    private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes) { [weak self] in
+    private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes, timer: timer) { [weak self] in
         self?.showSettings()
     }
     private let volume = VolumeMonitor()
@@ -29,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         islands.start()
         media.start()
+        timer.onFinish = { [weak self] in
+            guard let self else { return }
+            self.showIndicator(.timerDone(duration: self.timer.countdown.duration))
+            Haptics.alert()
+        }
 
         volume.onChange = { [weak self] level, muted in
             guard Pref.bool(Pref.showVolume) else { return }
@@ -128,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.launchAtLogin = LoginItem.isEnabled
         settingsState.hiderStatus = hider.status
         if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView(state: settingsState))
+            let host = NSHostingController(rootView: SettingsView(state: settingsState, updater: updater))
             let window = NSWindow(contentViewController: host)
             window.title = "Ledge Settings"
             window.styleMask = [.titled, .closable]

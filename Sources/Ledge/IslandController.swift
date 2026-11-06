@@ -44,6 +44,7 @@ final class IslandController {
     let model: IslandModel
     let calendar: CalendarStore
     let notes: NotesStore
+    let timer: TimerStore
     private var panel: IslandPanel?
     /// The resting island (the notch, or the idle pill), in global screen coordinates.
     private var anchorRect: NSRect = .zero
@@ -54,7 +55,8 @@ final class IslandController {
     private let openSettings: () -> Void
 
     init(displayID: CGDirectDisplayID, model: IslandModel, calendar: CalendarStore, notes: NotesStore,
-         openSettings: @escaping () -> Void) {
+         timer: TimerStore, openSettings: @escaping () -> Void) {
+        self.timer = timer
         self.displayID = displayID
         self.model = model
         self.calendar = calendar
@@ -143,7 +145,7 @@ final class IslandController {
             NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.model.isTyping = false }
             }
-            let root = IslandRootView(model: model, calendar: calendar, notes: notes, openSettings: openSettings)
+            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, openSettings: openSettings)
             let host = FirstMouseHostingView(rootView: root)
             host.frame = NSRect(origin: .zero, size: size)
             host.autoresizingMask = [.width, .height]

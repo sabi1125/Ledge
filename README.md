@@ -5,12 +5,14 @@ A personal, Alcove-style notch app for your MacBook Pro. It's for your own use o
 ## Using it
 
 - **Music:** when something plays (Apple Music, Spotify, YouTube in a browser, anything that shows in Control Center), the notch widens to show the album art and a waveform.
-- **Open the island:** hover over the notch, or click it. It has three pages: **Music** (shown only when something's loaded in a player), **Calendar** and **Notes**. Swipe left or right with two fingers to move between them, or click the dots at the top right.
+- **Open the island:** hover over the notch, or click it. Its pages are **Music** (shown only when something's loaded in a player), **Calendar**, **Timer** and **Notes**. Swipe left or right with two fingers to move between them, or click the dots at the top right. Switch any page off in settings. With the trackpad tick on, you feel a light tick as it opens.
 - **Music:** scrub, play/pause and skip. In the small music view (closed island), a two-finger swipe skips tracks.
 - **Calendar:** today's date and your next events from the Calendar app, with a **Join** button for Zoom, Meet, Teams and Webex links. It asks for Calendar access the first time.
+- **Timer:** pick a preset or add minutes, then Start. While it runs, the countdown shows in orange beside the notch. When it's done, a "Timer done" pill drops down with a sound.
 - **Notes:** click and type. It saves automatically to `~/Library/Application Support/Ledge/Notes.txt`. The island stays open while you type. Press **Esc** or click elsewhere to close it.
 - **Indicators:** volume, brightness, plugging in the charger, and low battery (20%, 10%, 5%) all show in the notch.
-- **Settings and quit:** right-click the notch. Opening Ledge again from Applications or Spotlight also opens settings.
+- **Settings and quit:** right-click the notch. Opening Ledge again from Applications or Spotlight also opens settings. Every page, indicator and behavior can be switched on or off there.
+
 ## External displays
 
 Screens without a notch get a floating pill at the top center, like the original iPhone Dynamic Island. It has the same features and stays visible on normal desktops. It's kept off full-screen desktops (apps and videos) at the macOS level, so it never flickers when you swipe. Turn it off with "Show Ledge on other displays" in settings.
@@ -23,11 +25,13 @@ Ledge also has an optional "Hide other apps' menu bar icons" setting (off). It s
 
 ## Updating
 
+In Ledge's settings, **Check for updates** compares your copy with GitHub (`sabi1125/Ledge`), lists what's new, and **Update and restart** pulls it and reinstalls. Or, from the terminal:
+
 ```bash
 ~/Ledge/scripts/install.sh
 ```
 
-This rebuilds the app, replaces `/Applications/Ledge.app` and restarts it. Permissions such as Accessibility carry over, because every build is signed with the same personal certificate, **Ledge Local Signing**, which lives in your login keychain. If that certificate is ever deleted, builds fall back to ad-hoc signing, and macOS will then ask for Accessibility again after each update.
+Either way, this rebuilds the app, replaces `/Applications/Ledge.app` and restarts it. Permissions such as Accessibility carry over, because every build is signed with the same personal certificate, **Ledge Local Signing**, which lives in your login keychain. If that certificate is ever deleted, builds fall back to ad-hoc signing, and macOS will then ask for Accessibility again after each update.
 
 ## Volume and brightness keys
 

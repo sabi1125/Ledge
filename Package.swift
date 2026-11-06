@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Ledge",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("15.0")],
     targets: [
         // Pure logic with no UI, so it can be unit tested.
         .target(name: "LedgeCore", path: "Sources/LedgeCore"),

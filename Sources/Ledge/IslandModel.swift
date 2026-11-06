@@ -9,6 +9,7 @@ enum HUD: Equatable {
     case brightness(level: Double)
     case charging(percent: Int)
     case lowBattery(percent: Int)
+    case timerDone(duration: TimeInterval)
 }
 
 /// Everything the island view needs to draw itself.
@@ -26,6 +27,11 @@ final class IslandModel: ObservableObject {
     @Published private(set) var hud: HUD?
     @Published private(set) var isHovering = false
     @Published private(set) var isExpanded = false
+    /// A countdown is running or paused: it lives in the notch's right wing.
+    @Published var timerActive = false { didSet { if timerActive != oldValue { recompute() } } }
+    /// Called when the island opens, for the trackpad tick.
+    var onOpen: (() -> Void)?
+
     /// Whether the black shape is drawn (see `recompute`).
     @Published private(set) var showsFill = false
     private var fillTimer: Timer?
@@ -106,6 +112,7 @@ final class IslandModel: ObservableObject {
         switch newHUD {
         case .volume, .brightness: seconds = 1.5
         case .charging, .lowBattery: seconds = 2.6
+        case .timerDone: seconds = 6
         }
         hudTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -120,6 +127,9 @@ final class IslandModel: ObservableObject {
         artwork = image
         tint = newTint
     }
+
+    /// Pages or features were switched on or off in settings.
+    func settingsChanged() { recompute() }
 
     /// Used only by the snapshot tool to draw a specific state.
     func forceShape(_ s: IslandShape, hud: HUD? = nil, page: IslandPage? = nil) {
@@ -138,24 +148,36 @@ final class IslandModel: ObservableObject {
 
     /// Width of the floating music pill, sized to fit the song name (nil on the notch).
     var compactWidth: CGFloat? {
-        guard style == .floating else { return nil }
-        let title = media.title ?? "", artist = media.artist ?? ""
+        // On the notch, the countdown needs slightly wider wings than the music bars.
+        guard style == .floating else { return timerActive ? notch.width + 2 * 52 : nil }
+        let musicShowing = hasMedia && media.isPlaying
+        let title = musicShowing ? (media.title ?? "") : "Timer"
+        let artist = musicShowing ? (media.artist ?? "") : ""
         let bold = NSFont.systemFont(ofSize: pillFontSize, weight: .semibold)
         let plain = NSFont.systemFont(ofSize: pillFontSize, weight: .regular)
         var width = (title as NSString).size(withAttributes: [.font: bold]).width
         if !artist.isEmpty { width += ("  " + artist as NSString).size(withAttributes: [.font: plain]).width }
+        // The countdown takes the place of the bars and is a bit wider.
+        if timerActive { width += Self.countdownWidth(fontSize: pillFontSize) - 16 }
         return IslandLayout.floatingCompactWidth(textWidth: width.rounded(.up) + 2, height: notch.height)
     }
-    var pages: [IslandPage] { IslandPage.available(hasMedia: hasMedia) }
+
+    static func countdownWidth(fontSize: CGFloat) -> CGFloat {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .semibold)
+        return ("00:00" as NSString).size(withAttributes: [.font: font]).width.rounded(.up) + 2
+    }
+    var pages: [IslandPage] { IslandPage.available(enabled: Pref.enabledPages, hasMedia: hasMedia) }
 
     private func expand(force: Bool = false) {
         guard force || isHovering || !Pref.bool(Pref.openOnHover) else { return }
-        guard !isExpanded else { return }
-        // Open on Music while something plays; otherwise where you left off.
-        if hasMedia && media.isPlaying { page = .music }
+        guard !isExpanded, !pages.isEmpty else { return }
+        // Open on Music while something plays, on the Timer while one runs; otherwise where you left off.
+        if hasMedia && media.isPlaying && pages.contains(.music) { page = .music }
+        else if timerActive && pages.contains(.timer) { page = .timer }
         else if !pages.contains(page) { page = pages.first ?? .calendar }
         isExpanded = true
         recompute()
+        onOpen?()
     }
 
     private func collapseIfIdle() {
@@ -165,13 +187,14 @@ final class IslandModel: ObservableObject {
     }
 
     private func recompute() {
-        if page == .music && !hasMedia { page = .calendar }
+        if !pages.isEmpty && !pages.contains(page) { page = pages.first! }
+        if isExpanded && pages.isEmpty { isExpanded = false }
         let next: IslandShape
         if isExpanded {
             next = .expanded
         } else if hud != nil {
             next = .hud
-        } else if hasMedia && media.isPlaying {
+        } else if (hasMedia && media.isPlaying) || timerActive {
             next = .compact
         } else if isHovering && !Pref.bool(Pref.openOnHover) {
             // Click-to-open mode: a small bump shows the island noticed you.

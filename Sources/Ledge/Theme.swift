@@ -18,6 +18,7 @@ enum Theme {
     static let green = Color(red: 0.37, green: 0.83, blue: 0.54)
     static let amber = Color(red: 1.0, green: 0.72, blue: 0.25)
     static let calendarRed = Color(red: 1.0, green: 0.36, blue: 0.33)
+    static let timerOrange = Color(red: 1.0, green: 0.62, blue: 0.2)
     static let joinBlue = Color(red: 0.2, green: 0.47, blue: 0.96)
 }
 

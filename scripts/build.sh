@@ -4,14 +4,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP=build/Ledge.app
+mkdir -p build
 echo "• Compiling Ledge"
-swift build -c release --arch arm64 2>&1 | grep -E "error|warning: |Compiling|Build" || true
+# Stop here if the build fails, so an old copy is never installed by mistake.
+if ! swift build -c release --arch arm64 > build/swift-build.log 2>&1; then
+  grep -E "error" build/swift-build.log | head -20
+  echo "✗ Build failed (see build/swift-build.log)"
+  exit 1
+fi
+grep -E "warning: " build/swift-build.log | head -10 || true
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/Ledge"
-[[ -x "$BIN" ]] || { echo "Build failed"; exit 1; }
 
 echo "• Compiling media bridge"
 mkdir -p build
-clang -dynamiclib -fobjc-arc -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+clang -dynamiclib -fobjc-arc -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
   -framework Foundation Bridge/MediaBridge.m -o build/MediaBridge.dylib
 
 if [[ ! -f build/AppIcon.icns || scripts/make-icon.swift -nt build/AppIcon.icns ]]; then
@@ -26,6 +32,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Ledge"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# Record which saved version this build came from ("+" means it has unsaved changes too).
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+[[ -n "$(git status --porcelain 2>/dev/null)" ]] && COMMIT="$COMMIT+"
+/usr/libexec/PlistBuddy -c "Add :LedgeCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp build/MediaBridge.dylib "$APP/Contents/Resources/MediaBridge.dylib"
 cp Bridge/media-bridge.pl "$APP/Contents/Resources/media-bridge.pl"

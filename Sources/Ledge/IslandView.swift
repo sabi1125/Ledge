@@ -46,6 +46,7 @@ struct IslandRootView: View {
     @ObservedObject var model: IslandModel
     var calendar: CalendarStore
     var notes: NotesStore
+    var timer: TimerStore
     var openSettings: () -> Void
 
     var body: some View {
@@ -91,7 +92,7 @@ struct IslandRootView: View {
         switch model.shape {
         // Content only fades (no scaling), so the shape itself carries the motion.
         case .compact:
-            CompactView(model: model)
+            CompactView(model: model, timer: timer)
                 .fixedFrame(for: .compact, model: model)
                 .transition(Self.fade)
         case .hud:
@@ -101,7 +102,7 @@ struct IslandRootView: View {
                     .transition(Self.fade)
             }
         case .expanded:
-            ExpandedView(model: model, calendar: calendar, notes: notes)
+            ExpandedView(model: model, calendar: calendar, notes: notes, timer: timer)
                 .fixedFrame(for: .expanded, model: model)
                 .transition(Self.fade)
         case .idle, .hover:
@@ -122,6 +123,10 @@ private extension View {
 
 struct CompactView: View {
     @ObservedObject var model: IslandModel
+    var timer: TimerStore
+
+    /// Music is showing (otherwise this view is here for the timer alone).
+    private var musicShowing: Bool { model.hasMedia && model.media.isPlaying }
 
     var body: some View {
         if model.style == .floating {
@@ -129,13 +134,21 @@ struct CompactView: View {
             let h = model.notch.height
             let m = IslandLayout.floatingCompactMetrics(height: h)
             HStack(spacing: m.gap) {
-                ArtworkView(image: model.artwork, size: m.art, radius: m.art * 0.3)
+                if musicShowing {
+                    ArtworkView(image: model.artwork, size: m.art, radius: m.art * 0.3)
+                } else {
+                    TimerBadge(size: m.art)
+                }
                 songLine
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                WaveformView(color: model.tint, playing: model.media.isPlaying)
-                    .frame(width: m.bars, height: h * 0.42)
+                if model.timerActive {
+                    CountdownLabel(timer: timer, size: model.pillFontSize)
+                } else {
+                    WaveformView(color: model.tint, playing: model.media.isPlaying)
+                        .frame(width: m.bars, height: h * 0.42)
+                }
             }
             // Art and bars sit well inside the pill's round ends.
             .padding(.leading, m.leading)
@@ -143,10 +156,18 @@ struct CompactView: View {
             .frame(height: h)
         } else {
             HStack(spacing: 0) {
-                ArtworkView(image: model.artwork, size: 22, radius: 6)
+                if musicShowing {
+                    ArtworkView(image: model.artwork, size: 22, radius: 6)
+                } else {
+                    TimerBadge(size: 22)
+                }
                 Spacer(minLength: model.notch.width)
-                WaveformView(color: model.tint, playing: model.media.isPlaying)
-                    .frame(width: 22, height: 14)
+                if model.timerActive {
+                    CountdownLabel(timer: timer, size: 12)
+                } else {
+                    WaveformView(color: model.tint, playing: model.media.isPlaying)
+                        .frame(width: 22, height: 14)
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: model.notch.height)
@@ -156,6 +177,9 @@ struct CompactView: View {
     /// Title in white, artist in gray.
     private var songLine: Text {
         let size = model.pillFontSize
+        guard musicShowing else {
+            return Text("Timer").font(.system(size: size, weight: .semibold)).foregroundColor(.white)
+        }
         let title = Text(model.media.title ?? "")
             .font(.system(size: size, weight: .semibold))
             .foregroundColor(.white)
@@ -163,6 +187,17 @@ struct CompactView: View {
         return title + Text("  \(artist)")
             .font(.system(size: size, weight: .regular))
             .foregroundColor(Theme.secondaryText)
+    }
+}
+
+/// An orange timer icon, in place of album art when only the timer is running.
+struct TimerBadge: View {
+    var size: CGFloat
+    var body: some View {
+        Image(systemName: "timer")
+            .font(.system(size: size * 0.62, weight: .semibold))
+            .foregroundStyle(Theme.timerOrange)
+            .frame(width: size, height: size)
     }
 }
 
@@ -207,10 +242,12 @@ struct PlayerView: View {
 
 struct ProgressRow: View {
     @ObservedObject var model: IslandModel
+    @Environment(\.isVisiblePage) private var visible
     @State private var dragFraction: Double?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+        // Ticks only while it's on screen and the song is playing.
+        TimelineView(.animation(minimumInterval: 0.5, paused: !(visible && model.media.isPlaying))) { context in
             let duration = model.media.duration
             let fraction = dragFraction ?? model.media.progress(at: context.date)
             let elapsed = duration > 0 ? fraction * duration : model.media.elapsed(at: context.date)
@@ -348,6 +385,15 @@ struct HUDView: View {
         case let .lowBattery(percent):
             statusRow(symbol: "exclamationmark.triangle.fill", title: "Low Battery", percent: percent,
                       battery: "battery.25percent", color: Theme.amber)
+        case let .timerDone(duration):
+            HStack(spacing: 7 * k) {
+                Image(systemName: "bell.fill").font(.system(size: 12 * k, weight: .semibold))
+                    .symbolEffect(.bounce, options: .repeating)
+                Text("Timer done").font(.system(size: 12.5 * k, weight: .semibold))
+                Spacer(minLength: 8)
+                Text(formatCountdown(duration)).font(.system(size: 12.5 * k, weight: .semibold).monospacedDigit())
+            }
+            .foregroundStyle(Theme.timerOrange)
         }
     }
 
@@ -430,39 +476,83 @@ struct ArtworkView: View {
 }
 
 /// Five bars that bounce while music plays and rest when it pauses.
-/// Driven by a timeline (not a repeating animation), so pausing and playing
-/// can never leave the bars frozen.
-struct WaveformView: View {
+/// The bouncing runs in macOS's animation system on the graphics hardware (Core Animation),
+/// so it costs almost no CPU, unlike redrawing the bars ourselves every frame.
+struct WaveformView: NSViewRepresentable {
     var color: Color
     var playing: Bool
 
-    private let speeds: [Double] = [7.1, 9.3, 6.2, 8.4, 7.7]
-    private let offsets: [Double] = [0, 1.3, 2.1, 0.7, 2.8]
-    private let rests: [CGFloat] = [0.3, 0.45, 0.25, 0.4, 0.35]
+    func makeNSView(context: Context) -> WaveformBarsView { WaveformBarsView() }
 
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !playing)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2.2) {
-                ForEach(0..<5, id: \.self) { i in
-                    Capsule()
-                        .fill(color)
-                        .frame(width: 2.6)
-                        .scaleEffect(x: 1, y: playing ? level(i, t) : rests[i], anchor: .center)
-                }
-            }
-            .animation(.easeOut(duration: 0.25), value: playing)
-        }
-    }
-
-    private func level(_ i: Int, _ t: Double) -> CGFloat {
-        // Two mixed waves per bar so the motion doesn't look mechanical.
-        let a = sin(t * speeds[i] + offsets[i])
-        let b = sin(t * speeds[i] * 0.53 + offsets[i] * 1.7)
-        return CGFloat(0.55 + 0.3 * a + 0.15 * b).clamped(to: 0.2...1)
+    func updateNSView(_ view: WaveformBarsView, context: Context) {
+        view.update(color: NSColor(color), playing: playing)
     }
 }
 
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self { min(max(self, range.lowerBound), range.upperBound) }
+final class WaveformBarsView: NSView {
+    private let bars: [CALayer] = (0..<5).map { _ in CALayer() }
+    private let rests: [CGFloat] = [0.3, 0.45, 0.25, 0.4, 0.35]
+    private let durations: [Double] = [0.42, 0.55, 0.36, 0.5, 0.46]
+    private let delays: [Double] = [0, 0.21, 0.09, 0.33, 0.15]
+    private var playing: Bool?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        for bar in bars { layer?.addSublayer(bar) }
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layout() {
+        super.layout()
+        let n = CGFloat(bars.count)
+        let gap = min(2.2, bounds.width * 0.08)
+        let w = max(1.5, (bounds.width - gap * (n - 1)) / n)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in bars.enumerated() {
+            bar.bounds = CGRect(x: 0, y: 0, width: w, height: bounds.height)
+            bar.position = CGPoint(x: CGFloat(i) * (w + gap) + w / 2, y: bounds.midY)
+            bar.cornerRadius = w / 2
+        }
+        CATransaction.commit()
+    }
+
+    func update(color: NSColor, playing: Bool) {
+        let cg = color.cgColor
+        for bar in bars where bar.backgroundColor != cg { bar.backgroundColor = cg }
+        guard playing != self.playing else { return }
+        self.playing = playing
+        let now = CACurrentMediaTime()
+        for (i, bar) in bars.enumerated() {
+            bar.removeAnimation(forKey: "bounce")
+            if playing {
+                let a = CABasicAnimation(keyPath: "transform.scale.y")
+                a.fromValue = rests[i]
+                a.toValue = 1.0
+                a.duration = durations[i]
+                a.autoreverses = true
+                a.repeatCount = .infinity
+                a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                a.beginTime = now + delays[i]
+                a.fillMode = .backwards
+                bar.add(a, forKey: "bounce")
+            }
+            // Resting height (also what the bars settle to when paused).
+            bar.transform = CATransform3DMakeScale(1, rests[i], 1)
+        }
+    }
+}
+
+/// Whether a page of the open island is the one on screen (hidden pages pause their clocks).
+private struct IsVisiblePageKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var isVisiblePage: Bool {
+        get { self[IsVisiblePageKey.self] }
+        set { self[IsVisiblePageKey.self] = newValue }
+    }
 }

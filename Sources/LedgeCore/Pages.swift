@@ -2,12 +2,13 @@ import Foundation
 
 /// The pages of the open island, in swipe order.
 public enum IslandPage: String, CaseIterable, Sendable {
-    case music, calendar, notes
+    case music, calendar, timer, notes
 
     public var title: String {
         switch self {
         case .music: return "Music"
         case .calendar: return "Calendar"
+        case .timer: return "Timer"
         case .notes: return "Notes"
         }
     }
@@ -16,13 +17,15 @@ public enum IslandPage: String, CaseIterable, Sendable {
         switch self {
         case .music: return "music.note"
         case .calendar: return "calendar"
+        case .timer: return "timer"
         case .notes: return "note.text"
         }
     }
 
-    /// Pages available right now (Music only while something is loaded in a player).
-    public static func available(hasMedia: Bool) -> [IslandPage] {
-        hasMedia ? [.music, .calendar, .notes] : [.calendar, .notes]
+    /// Pages available right now: the ones switched on in settings, in swipe order.
+    /// Music only shows while something is loaded in a player.
+    public static func available(enabled: Set<IslandPage> = Set(allCases), hasMedia: Bool) -> [IslandPage] {
+        allCases.filter { enabled.contains($0) && ($0 != .music || hasMedia) }
     }
 
     /// The page one step away, or nil at either end (no wrap-around).

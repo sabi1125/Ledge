@@ -9,6 +9,7 @@ enum Snapshot {
     static func render(to dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         Pref.registerDefaults()
+        renderSettings(to: dir)
         let notch = NotchMetrics(width: 185, height: 32)
         let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
             ("f1-pill-idle", .idle, nil, false, .music),
@@ -28,6 +29,13 @@ enum Snapshot {
             ("7-charging", .hud, .charging(percent: 82), false, .music),
             ("8-low-battery", .hud, .lowBattery(percent: 10), false, .music),
             ("9-calendar", .expanded, nil, true, .calendar),
+            ("12-timer-page-idle", .expanded, nil, false, .timer),
+            ("13-timer-page-running", .expanded, nil, false, .timer),
+            ("14-timer-compact", .compact, nil, false, .music),
+            ("15-timer-compact-music", .compact, nil, true, .music),
+            ("16-timer-done", .hud, .timerDone(duration: 1500), false, .music),
+            ("f7-pill-timer", .compact, nil, false, .music),
+            ("f8-pill-timer-music", .compact, nil, true, .music),
             ("10-notes", .expanded, nil, true, .notes),
             ("11-notes-empty", .expanded, nil, true, .notes),
         ]
@@ -47,6 +55,11 @@ enum Snapshot {
                          isAllDay: false, color: .purple, joinURL: nil),
         ]
         for (name, shape, hud, playing, page) in cases {
+            let timerStore = TimerStore()
+            if name.contains("timer") {
+                timerStore.choose(minutes: 25)
+                if !name.contains("idle") { timerStore.start() }
+            }
             let calendarStore = CalendarStore()
             calendarStore.useSample(sampleEvents)
             let notesStore = NotesStore(sample: name == "10-notes"
@@ -64,6 +77,7 @@ enum Snapshot {
             media.isPlaying = playing
             media.timestamp = Date()
             model.media = media
+            model.timerActive = timerStore.countdown.isActive
             let art = sampleArtwork()
             model.setArtwork(image: art, tint: ArtworkColor.tint(for: art) ?? Theme.defaultTint)
             model.forceShape(shape, hud: hud, page: page)
@@ -74,7 +88,7 @@ enum Snapshot {
                                startPoint: .top, endPoint: .bottom)
                 // Menu bar strip, for context.
                 Color.white.opacity(0.06).frame(height: floating ? 25 : notch.height)
-                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, openSettings: {})
+                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, timer: timerStore, openSettings: {})
             }
             .frame(width: panel.width, height: panel.height)
 
@@ -84,6 +98,22 @@ enum Snapshot {
                let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
             }
+        }
+    }
+
+    /// The settings window, rendered in a real (offscreen) window so the form draws properly.
+    static func renderSettings(to dir: String) {
+        let view = SettingsView(state: SettingsState(), updater: Updater())
+        let host = NSHostingView(rootView: view)
+        let size = host.fittingSize
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/settings.png"))
         }
     }
 

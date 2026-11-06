@@ -8,6 +8,7 @@ struct ExpandedView: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var calendar: CalendarStore
     @ObservedObject var notes: NotesStore
+    @ObservedObject var timer: TimerStore
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +21,8 @@ struct ExpandedView: View {
                 HStack(alignment: .top, spacing: 0) {
                     ForEach(pages, id: \.self) { p in
                         pageView(p)
+                            // Hidden pages stop their clocks (no wasted redraws).
+                            .environment(\.isVisiblePage, p == model.page)
                             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                             .opacity(p == model.page ? 1 : 0.35)
                     }
@@ -35,6 +38,7 @@ struct ExpandedView: View {
         switch page {
         case .music: PlayerView(model: model)
         case .calendar: CalendarPage(calendar: calendar)
+        case .timer: TimerPage(timer: timer)
         case .notes: NotesPage(notes: notes, model: model)
         }
     }
@@ -250,5 +254,130 @@ struct NotesPage: View {
         .onChange(of: focused) { _, now in model.isTyping = now }
         .onChange(of: model.isTyping) { _, now in if !now { focused = false } }
         .onDisappear { notes.saveNow() }
+    }
+}
+
+// MARK: - Timer
+
+struct TimerPage: View {
+    @ObservedObject var timer: TimerStore
+    @Environment(\.isVisiblePage) private var visible
+
+    var body: some View {
+        // Ticks only while it's on screen and counting down.
+        TimelineView(.animation(minimumInterval: 0.5, paused: !(visible && timer.countdown.isRunning))) { context in
+            let c = timer.countdown
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(formatCountdown(c.remaining(at: context.date)))
+                        .font(.system(size: 40, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(c.phase == .finished ? Theme.timerOrange : .white)
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(Theme.quick, value: Int(c.remaining(at: context.date)))
+                    Text(status(c, now: context.date))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                    HStack(spacing: 8) {
+                        primaryButton(c)
+                        if c.isActive || c.phase == .finished {
+                            Button("Reset") { timer.reset() }.buttonStyle(TimerButtonStyle(primary: false))
+                        }
+                        Button("+1 min") { timer.addMinute() }.buttonStyle(TimerButtonStyle(primary: false))
+                    }
+                    .padding(.top, 2)
+                }
+                Spacer(minLength: 8)
+                presets(c)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 4)
+            .padding(.bottom, 14)
+        }
+    }
+
+    @ViewBuilder private func primaryButton(_ c: Countdown) -> some View {
+        switch c.phase {
+        case .running:
+            Button { timer.pause() } label: { Label("Pause", systemImage: "pause.fill") }
+                .buttonStyle(TimerButtonStyle(primary: true))
+        case .paused:
+            Button { timer.start() } label: { Label("Resume", systemImage: "play.fill") }
+                .buttonStyle(TimerButtonStyle(primary: true))
+        case .idle, .finished:
+            Button { timer.start() } label: { Label("Start", systemImage: "play.fill") }
+                .buttonStyle(TimerButtonStyle(primary: true))
+        }
+    }
+
+    private func presets(_ c: Countdown) -> some View {
+        let columns = Array(repeating: GridItem(.fixed(44), spacing: 6), count: 3)
+        return LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(TimerStore.presets, id: \.self) { minutes in
+                let selected = !c.isActive && Int(c.duration) == minutes * 60
+                Button("\(minutes)m") { timer.choose(minutes: minutes) }
+                    .buttonStyle(PresetButtonStyle(selected: selected))
+                    .disabled(c.isActive)
+                    .opacity(c.isActive ? 0.35 : 1)
+            }
+        }
+        .frame(width: 44 * 3 + 12)
+    }
+
+    private func status(_ c: Countdown, now: Date) -> String {
+        switch c.phase {
+        case .idle: return "Pick a length, then Start"
+        case .running:
+            let end = Date().addingTimeInterval(c.remaining(at: Date()))
+            return "Ends at \(end.formatted(date: .omitted, time: .shortened))"
+        case .paused: return "Paused"
+        case .finished: return "Done"
+        }
+    }
+}
+
+struct TimerButtonStyle: ButtonStyle {
+    var primary: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(primary ? Color.black : Color.white)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(primary ? Theme.timerOrange : Color(white: 0.2)))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(Theme.quick, value: configuration.isPressed)
+    }
+}
+
+struct PresetButtonStyle: ButtonStyle {
+    var selected: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            .foregroundStyle(selected ? Color.black : Color.white)
+            .frame(width: 44, height: 28)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected ? Theme.timerOrange : Color(white: 0.16)))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// The live countdown shown beside the notch or in the pill.
+struct CountdownLabel: View {
+    @ObservedObject var timer: TimerStore
+    var size: CGFloat
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1, paused: !timer.countdown.isRunning)) { context in
+            Text(formatCountdown(timer.countdown.remaining(at: context.date)))
+                .font(.system(size: size, weight: .semibold).monospacedDigit())
+                .foregroundStyle(timer.countdown.isRunning ? Theme.timerOrange : Theme.secondaryText)
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }

@@ -11,13 +11,16 @@ final class IslandManager {
     private let media: MediaController
     private let calendar: CalendarStore
     private let notes: NotesStore
+    private let timer: TimerStore
     private let openSettings: () -> Void
     private var cancellables = Set<AnyCancellable>()
     private var lastShowOthers: Bool?
     private let fullScreen = FullScreenWatcher()
 
-    init(media: MediaController, calendar: CalendarStore, notes: NotesStore, openSettings: @escaping () -> Void) {
+    init(media: MediaController, calendar: CalendarStore, notes: NotesStore, timer: TimerStore,
+         openSettings: @escaping () -> Void) {
         self.media = media
+        self.timer = timer
         self.calendar = calendar
         self.notes = notes
         self.openSettings = openSettings
@@ -28,6 +31,18 @@ final class IslandManager {
     func start() {
         media.islands = { [weak self] in self?.models ?? [] }
         sync()
+        // A running or paused timer shows in every island's compact view.
+        timer.$countdown
+            .map(\.isActive)
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] active in self?.models.forEach { $0.timerActive = active } }
+            .store(in: &cancellables)
+        // Settings changes (pages switched on or off) reshape every island.
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.models.forEach { $0.settingsChanged() } }
+            .store(in: &cancellables)
         // Keep each pill on its screen's normal desktops only (see FullScreenWatcher).
         fullScreen.onChange = { [weak self] in self?.applyFullScreen() }
         fullScreen.start()
@@ -58,8 +73,10 @@ final class IslandManager {
             } else {
                 let model = IslandModel()
                 model.onCommand = { [weak self] in self?.media.send($0) }
+                model.timerActive = timer.countdown.isActive
+                model.onOpen = { Haptics.openTick() }
                 let controller = IslandController(displayID: id, model: model, calendar: calendar, notes: notes,
-                                                  openSettings: openSettings)
+                                                  timer: timer, openSettings: openSettings)
                 controllers[id] = controller
                 controller.start(on: screen)
                 if model.style == .floating { apply(fullScreenRulesTo: controller) }
@@ -72,6 +89,7 @@ final class IslandManager {
             controllers[id] = nil
             LedgeLog.shared.write("islands: removed island from display \(id)")
         }
+        fullScreen.isNeeded = controllers.values.contains { $0.model.style == .floating }
     }
 
     private func applyFullScreen() {

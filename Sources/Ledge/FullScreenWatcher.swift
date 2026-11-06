@@ -23,10 +23,23 @@ final class FullScreenWatcher {
         // A new full-screen desktop is created the moment an app starts going full screen;
         // catch it quickly so the pill is taken off it during the animation (each check is one
         // tiny system call).
-        timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.check() }
-        }
         check()
+    }
+
+    /// Fast checking is only needed while an external screen has a pill.
+    var isNeeded = false {
+        didSet {
+            guard isNeeded != oldValue else { return }
+            timer?.invalidate()
+            timer = nil
+            if isNeeded {
+                timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.check() }
+                }
+                timer?.tolerance = 0.03
+                check()
+            }
+        }
     }
 
     func check() {

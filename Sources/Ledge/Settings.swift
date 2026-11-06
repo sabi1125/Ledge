@@ -1,4 +1,5 @@
 import Foundation
+import LedgeCore
 import ServiceManagement
 
 /// UserDefaults keys and defaults, shared by the app and the settings window.
@@ -11,6 +12,20 @@ enum Pref {
     static let hideMenuBarIcons = "hideMenuBarIcons"
     static let didFirstLaunch = "didFirstLaunch"
     static let showOnOtherDisplays = "showOnOtherDisplays"
+    static let pageCalendar = "pageCalendar"
+    static let pageTimer = "pageTimer"
+    static let pageNotes = "pageNotes"
+    static let haptics = "haptics"
+
+    /// The island pages switched on in settings (Music uses "Show what's playing").
+    static var enabledPages: Set<IslandPage> {
+        var pages = Set<IslandPage>()
+        if bool(showMusic) { pages.insert(.music) }
+        if bool(pageCalendar) { pages.insert(.calendar) }
+        if bool(pageTimer) { pages.insert(.timer) }
+        if bool(pageNotes) { pages.insert(.notes) }
+        return pages
+    }
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -21,6 +36,10 @@ enum Pref {
             openOnHover: true,
             hideMenuBarIcons: true,
             showOnOtherDisplays: true,
+            pageCalendar: true,
+            pageTimer: true,
+            pageNotes: true,
+            haptics: true,
         ])
     }
 

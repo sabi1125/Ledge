@@ -163,20 +163,68 @@ final class SwipeDetectorTests: XCTestCase {
 
 final class PageTests: XCTestCase {
     func testMusicPageOnlyWithMedia() {
-        XCTAssertEqual(IslandPage.available(hasMedia: true), [.music, .calendar, .notes])
-        XCTAssertEqual(IslandPage.available(hasMedia: false), [.calendar, .notes])
+        XCTAssertEqual(IslandPage.available(hasMedia: true), [.music, .calendar, .timer, .notes])
+        XCTAssertEqual(IslandPage.available(hasMedia: false), [.calendar, .timer, .notes])
+    }
+
+    func testPagesSwitchedOffInSettingsAreLeftOut() {
+        XCTAssertEqual(IslandPage.available(enabled: [.music, .calendar, .timer], hasMedia: true),
+                       [.music, .calendar, .timer])
+        XCTAssertEqual(IslandPage.available(enabled: [.music], hasMedia: false), [])
     }
 
     func testSteppingStopsAtTheEnds() {
         let pages = IslandPage.available(hasMedia: true)
         XCTAssertEqual(IslandPage.step(from: .music, forward: true, in: pages), .calendar)
-        XCTAssertEqual(IslandPage.step(from: .calendar, forward: true, in: pages), .notes)
+        XCTAssertEqual(IslandPage.step(from: .calendar, forward: true, in: pages), .timer)
+        XCTAssertEqual(IslandPage.step(from: .timer, forward: true, in: pages), .notes)
         XCTAssertNil(IslandPage.step(from: .notes, forward: true, in: pages))
         XCTAssertNil(IslandPage.step(from: .music, forward: false, in: pages))
     }
 
     func testSteppingFromAMissingPageGoesToTheFirst() {
-        XCTAssertEqual(IslandPage.step(from: .music, forward: true, in: [.calendar, .notes]), .calendar)
+        XCTAssertEqual(IslandPage.step(from: .music, forward: true, in: [.calendar, .timer, .notes]), .calendar)
+    }
+}
+
+final class CountdownTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 1000)
+
+    func testRunsDownAndFinishesOnce() {
+        var c = Countdown(duration: 60)
+        c.start(at: t0)
+        XCTAssertEqual(c.remaining(at: t0.addingTimeInterval(15)), 45, accuracy: 0.001)
+        XCTAssertFalse(c.tick(at: t0.addingTimeInterval(59)))
+        XCTAssertTrue(c.tick(at: t0.addingTimeInterval(60)))
+        XCTAssertFalse(c.tick(at: t0.addingTimeInterval(61))) // only once
+        XCTAssertEqual(c.phase, .finished)
+        XCTAssertFalse(c.isActive)
+    }
+
+    func testPauseKeepsTheRemainingTime() {
+        var c = Countdown(duration: 120)
+        c.start(at: t0)
+        c.pause(at: t0.addingTimeInterval(20))
+        XCTAssertEqual(c.remaining(at: t0.addingTimeInterval(500)), 100, accuracy: 0.001)
+        c.start(at: t0.addingTimeInterval(500))
+        XCTAssertEqual(c.remaining(at: t0.addingTimeInterval(510)), 90, accuracy: 0.001)
+    }
+
+    func testAddingTimeAndReset() {
+        var c = Countdown(duration: 60)
+        c.start(at: t0)
+        c.add(60, at: t0)
+        XCTAssertEqual(c.remaining(at: t0), 120, accuracy: 0.001)
+        c.reset()
+        XCTAssertEqual(c.phase, .idle)
+        XCTAssertEqual(c.remaining(at: t0), 60) // back to the chosen length
+    }
+
+    func testFormat() {
+        XCTAssertEqual(formatCountdown(299.2), "5:00")
+        XCTAssertEqual(formatCountdown(65), "1:05")
+        XCTAssertEqual(formatCountdown(3723), "1:02:03")
+        XCTAssertEqual(formatCountdown(0), "0:00")
     }
 }
 
