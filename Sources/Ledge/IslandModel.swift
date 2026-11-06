@@ -32,6 +32,14 @@ final class IslandModel: ObservableObject {
     /// Called when the island opens, for the trackpad tick.
     var onOpen: (() -> Void)?
 
+    /// Ledge's settings are showing in this island (opened from Spotlight or a right-click).
+    @Published private(set) var isShowingSettings = false
+    /// Called when settings open or close, so the panel can take or give back keyboard focus.
+    var onSettingsShown: ((Bool) -> Void)?
+
+    /// Whether the last shape change made the island bigger (opening) or smaller (closing).
+    @Published private(set) var growing = true
+
     /// Whether the black shape is drawn (see `recompute`).
     @Published private(set) var showsFill = false
     private var fillTimer: Timer?
@@ -76,6 +84,7 @@ final class IslandModel: ObservableObject {
     }
 
     func clicked() {
+        guard !isShowingSettings else { return } // settings has its own close button
         if isExpanded {
             // Clicks inside Notes are for typing, not for closing.
             guard page != .notes else { return }
@@ -126,6 +135,45 @@ final class IslandModel: ObservableObject {
     func setArtwork(image: NSImage?, tint newTint: Color) {
         artwork = image
         tint = newTint
+    }
+
+    func openSettings() {
+        guard !isShowingSettings else { return }
+        isTyping = false
+        isExpanded = false
+        isShowingSettings = true
+        recompute()
+        onSettingsShown?(true)
+        onOpen?()
+    }
+
+    func closeSettings() {
+        guard isShowingSettings else { return }
+        isShowingSettings = false
+        recompute()
+        onSettingsShown?(false)
+    }
+
+    /// Settings closes and reopens, to show the animation style just picked.
+    func replaySettings() {
+        guard isShowingSettings else { return }
+        isShowingSettings = false
+        recompute()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            guard let self, !self.isShowingSettings else { return }
+            self.isShowingSettings = true
+            self.recompute()
+        }
+    }
+
+    /// Opens the island and closes it again, to show off the animation style.
+    func previewAnimation() {
+        guard !isExpanded else { return }
+        expand(force: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, !self.isHovering, !self.isTyping else { return }
+            self.close()
+        }
     }
 
     /// Pages or features were switched on or off in settings.
@@ -190,7 +238,9 @@ final class IslandModel: ObservableObject {
         if !pages.isEmpty && !pages.contains(page) { page = pages.first! }
         if isExpanded && pages.isEmpty { isExpanded = false }
         let next: IslandShape
-        if isExpanded {
+        if isShowingSettings {
+            next = .settings
+        } else if isExpanded {
             next = .expanded
         } else if hud != nil {
             next = .hud
@@ -211,11 +261,15 @@ final class IslandModel: ObservableObject {
             if !showsFill { showsFill = true }
         } else if showsFill {
             fillTimer?.invalidate()
-            fillTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            // Long enough for the slowest closing animation to settle back into the notch.
+            fillTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
                 Task { @MainActor in if self?.shape == .idle { self?.showsFill = false } }
             }
         }
         if next != shape {
+            let old = IslandLayout.size(for: shape, notch: notch, style: style, compactWidth: compactWidth)
+            let new = IslandLayout.size(for: next, notch: notch, style: style, compactWidth: compactWidth)
+            growing = new.width * new.height >= old.width * old.height
             let p = NSEvent.mouseLocation
             LedgeLog.shared.write("island: \(shape) -> \(next) page \(page.rawValue) (pointer \(Int(p.x)),\(Int(p.y)) buttons \(NSEvent.pressedMouseButtons) hover \(isHovering) typing \(isTyping) playing \(media.isPlaying))")
             shape = next

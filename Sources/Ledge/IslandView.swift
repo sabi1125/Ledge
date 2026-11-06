@@ -47,20 +47,43 @@ struct IslandRootView: View {
     var calendar: CalendarStore
     var notes: NotesStore
     var timer: TimerStore
+    var settings: SettingsState
+    var updater: Updater
     var openSettings: () -> Void
+
+    /// The island's current, on-screen geometry. Each part animates on its own clock, so a
+    /// style can move width and height at different times (SwiftUI would otherwise merge them).
+    @State private var width: CGFloat = 0
+    @State private var height: CGFloat = 0
+    @State private var bottomRadius: CGFloat = 10
+    @State private var topRadius: CGFloat = 0
+    @State private var shoulder: CGFloat = 6
+    @State private var didAppear = false
+
+    private var target: IslandGeometry {
+        let shape = model.shape, style = model.style
+        let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth)
+        return IslandGeometry(width: size.width, height: size.height,
+                              bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
+                              topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style),
+                              shoulder: IslandLayout.shoulderRadius(for: shape, style: style))
+    }
 
     var body: some View {
         let shape = model.shape
         let style = model.style
-        let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth)
-        let shoulder = IslandLayout.shoulderRadius(for: shape, style: style)
-        let outline = IslandOutline(bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
-                                    shoulder: shoulder,
-                                    topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style))
+        let goal = target
+        // Until the first layout, draw at the target size.
+        let w = didAppear ? width : goal.width
+        let h = didAppear ? height : goal.height
+        let outline = IslandOutline(bottomRadius: didAppear ? bottomRadius : goal.bottomRadius,
+                                    shoulder: didAppear ? shoulder : goal.shoulder,
+                                    topRadius: didAppear ? topRadius : goal.topRadius)
+        let s = didAppear ? shoulder : goal.shoulder
 
         ZStack(alignment: .top) {
             // At rest the real notch is enough: draw nothing, so the island can never show up
-            // on its own (e.g. over a window being moved). It fades in as it grows out of the notch.
+            // on its own (e.g. over a window being moved).
             outline.fill(Color.black)
                 .opacity(model.showsFill ? 1 : 0)
                 .animation(nil, value: model.showsFill) // switch instantly, never fade
@@ -68,10 +91,10 @@ struct IslandRootView: View {
             // the black shape opens and closes over it like a window, so nothing squishes.
             content
         }
-        .frame(width: size.width + shoulder * 2, height: size.height)
+        .frame(width: w + s * 2, height: h)
         .clipShape(outline)
         .contentShape(outline)
-        .shadow(color: .black.opacity(shape == .expanded ? 0.5 : 0), radius: 16, y: 6)
+        .shadow(color: .black.opacity(shape == .expanded || shape == .settings ? 0.5 : 0), radius: 16, y: 6)
         .onTapGesture { model.clicked() }
         .contextMenu {
             Button("Ledge Settings…", action: openSettings)
@@ -80,13 +103,41 @@ struct IslandRootView: View {
         }
         .padding(.top, IslandLayout.topGap(style: style))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(shape == .hud ? Theme.pop : Theme.spring, value: shape)
         .environment(\.colorScheme, .dark)
+        .onAppear { move(to: goal, from: nil) }
+        .onChange(of: goal) { old, new in move(to: new, from: old) }
     }
 
-    private static let fade = AnyTransition.asymmetric(
-        insertion: .opacity.animation(Theme.contentIn),
-        removal: .opacity.animation(Theme.contentOut))
+    /// Animates the shape to its new size in the chosen style.
+    private func move(to new: IslandGeometry, from old: IslandGeometry?) {
+        guard let old, didAppear else {
+            width = new.width; height = new.height
+            bottomRadius = new.bottomRadius; topRadius = new.topRadius; shoulder = new.shoulder
+            didAppear = true
+            return
+        }
+        let growing = new.width * new.height >= old.width * old.height
+        let style = IslandAnimation.current
+        let isHUD = model.shape == .hud || (!growing && old.height > new.height && model.hud != nil)
+        // Closing: let the content fade out first, so the shape only ever closes over empty black.
+        let lead = growing ? 0 : 0.09
+        let widthAnimation = (isHUD ? Theme.pop : style.width(growing: growing)).delay(lead)
+        let heightAnimation = (isHUD ? Theme.pop : style.height(growing: growing)).delay(lead)
+        // The top-corner shoulders belong to the width (so a narrowing island is never wider
+        // than the notch); the bottom corners belong to the height.
+        withAnimation(widthAnimation) {
+            width = new.width
+            shoulder = new.shoulder
+        }
+        withAnimation(heightAnimation) {
+            height = new.height
+            bottomRadius = new.bottomRadius
+            topRadius = new.topRadius
+        }
+    }
+
+    /// Content only fades in and out (never scales), in the chosen animation style.
+    private static var fade: AnyTransition { IslandAnimation.current.content }
 
     @ViewBuilder private var content: some View {
         switch model.shape {
@@ -105,6 +156,10 @@ struct IslandRootView: View {
             ExpandedView(model: model, calendar: calendar, notes: notes, timer: timer)
                 .fixedFrame(for: .expanded, model: model)
                 .transition(Self.fade)
+        case .settings:
+            SettingsPanel(model: model, state: settings, updater: updater)
+                .fixedFrame(for: .settings, model: model)
+                .transition(Self.fade)
         case .idle, .hover:
             Color.clear
         }
@@ -117,6 +172,15 @@ private extension View {
         let s = IslandLayout.size(for: shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth)
         return frame(width: s.width, height: s.height, alignment: .top)
     }
+}
+
+/// The island's size and corner shape, as a value SwiftUI can watch for changes.
+struct IslandGeometry: Equatable {
+    var width: CGFloat
+    var height: CGFloat
+    var bottomRadius: CGFloat
+    var topRadius: CGFloat
+    var shoulder: CGFloat
 }
 
 // MARK: - Compact (music playing)

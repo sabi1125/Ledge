@@ -51,3 +51,93 @@ enum ArtworkColor {
         return Color(nsColor: tuned)
     }
 }
+
+/// How the island opens and closes (chosen in Settings → Animation).
+enum IslandAnimation: String, CaseIterable, Identifiable {
+    case morph, drop, stretch, calm
+
+    static let key = "animationStyle"
+    static var current: IslandAnimation {
+        UserDefaults.standard.string(forKey: key).flatMap(IslandAnimation.init(rawValue:)) ?? .calm
+    }
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .morph: return "Morph and blur"
+        case .drop: return "Drop down"
+        case .stretch: return "Stretch"
+        case .calm: return "Calm"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .morph: return "Springs open, content sharpens in. Closest to iPhone."
+        case .drop: return "Falls out of the notch first, then widens."
+        case .stretch: return "Widens sideways first, then drops down."
+        case .calm: return "Quick and smooth, no bounce."
+        }
+    }
+
+    /// Width and height animate separately, so a style can do one before the other.
+    func width(growing: Bool) -> Animation {
+        // Closing always lands exactly on the notch's width (no dipping narrower and back).
+        switch self {
+        case .morph: return growing ? .spring(response: 0.5, dampingFraction: 0.72)
+                                    : .spring(response: 0.34, dampingFraction: 1)
+        case .drop: return growing ? .spring(response: 0.36, dampingFraction: 0.85).delay(0.12)
+                                   : .spring(response: 0.3, dampingFraction: 1)
+        case .stretch: return growing ? .spring(response: 0.32, dampingFraction: 0.8)
+                                      : .spring(response: 0.3, dampingFraction: 1).delay(0.12)
+        case .calm: return growing ? .smooth(duration: 0.28) : .smooth(duration: 0.24)
+        }
+    }
+
+    func height(growing: Bool) -> Animation {
+        // Heights stop exactly at their target (no stretching past it and back).
+        switch self {
+        case .morph: return growing ? .spring(response: 0.45, dampingFraction: 1)
+                                    : .spring(response: 0.34, dampingFraction: 1)
+        case .drop: return growing ? .spring(response: 0.36, dampingFraction: 1)
+                                   : .spring(response: 0.3, dampingFraction: 1).delay(0.12)
+        case .stretch: return growing ? .spring(response: 0.36, dampingFraction: 1).delay(0.14)
+                                      : .spring(response: 0.26, dampingFraction: 1)
+        case .calm: return growing ? .smooth(duration: 0.28) : .smooth(duration: 0.24)
+        }
+    }
+
+    /// For everything else that changes with the shape (corner radii and so on).
+    var shape: Animation { height(growing: true) }
+
+    /// How the content inside appears and disappears. It never scales.
+    var content: AnyTransition {
+        let out = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+        switch self {
+        case .morph:
+            return .asymmetric(
+                insertion: .modifier(active: BlurFade(radius: 8, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                    .animation(.easeOut(duration: 0.3).delay(0.15)),
+                removal: .modifier(active: BlurFade(radius: 6, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                    .animation(.easeOut(duration: 0.15)))
+        case .drop:
+            return .asymmetric(
+                insertion: AnyTransition.offset(y: -12).combined(with: .opacity)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.2)),
+                removal: out)
+        case .stretch:
+            return .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.25).delay(0.3)), removal: out)
+        case .calm:
+            return .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.22).delay(0.1)), removal: out)
+        }
+    }
+}
+
+struct BlurFade: ViewModifier {
+    var radius: CGFloat
+    var opacity: Double
+    func body(content: Content) -> some View {
+        content.blur(radius: radius).opacity(opacity)
+    }
+}

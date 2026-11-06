@@ -45,6 +45,8 @@ final class IslandController {
     let calendar: CalendarStore
     let notes: NotesStore
     let timer: TimerStore
+    let settings: SettingsState
+    let updater: Updater
     private var panel: IslandPanel?
     /// The resting island (the notch, or the idle pill), in global screen coordinates.
     private var anchorRect: NSRect = .zero
@@ -55,8 +57,10 @@ final class IslandController {
     private let openSettings: () -> Void
 
     init(displayID: CGDirectDisplayID, model: IslandModel, calendar: CalendarStore, notes: NotesStore,
-         timer: TimerStore, openSettings: @escaping () -> Void) {
+         timer: TimerStore, settings: SettingsState, updater: Updater, openSettings: @escaping () -> Void) {
         self.timer = timer
+        self.settings = settings
+        self.updater = updater
         self.displayID = displayID
         self.model = model
         self.calendar = calendar
@@ -74,11 +78,36 @@ final class IslandController {
         installMonitors()
 
         // Leaving Notes or closing: hand keyboard focus back to the app you were in.
-        model.onEndTyping = { [weak self] in
-            guard let panel = self?.panel, panel.isKeyWindow else { return }
-            panel.orderOut(nil)
-            panel.orderFrontRegardless()
+        model.onEndTyping = { [weak self] in self?.giveBackFocus() }
+        // Settings takes keyboard focus while open (for Esc), and gives it back after.
+        model.onSettingsShown = { [weak self] shown in
+            guard let self, let panel = self.panel else { return }
+            if shown { panel.makeKey() } else { self.giveBackFocus() }
         }
+    }
+
+    /// Debug only: saves the island as images every few milliseconds, to check animations.
+    func recordFrames(to dir: String, seconds: TimeInterval = 2.4, every interval: TimeInterval = 0.04) {
+        guard let view = panel?.contentView else { return }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let start = Date()
+        var index = 0
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { t in
+            MainActor.assumeIsolated {
+                guard Date().timeIntervalSince(start) < seconds,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { t.invalidate(); return }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: String(format: "%@/%03d.png", dir, index)))
+                index += 1
+            }
+        }
+    }
+
+    private func giveBackFocus() {
+        guard let panel, panel.isKeyWindow else { return }
+        panel.orderOut(nil)
+        if !isHidden { panel.orderFrontRegardless() }
     }
 
     func stop() {
@@ -139,13 +168,17 @@ final class IslandController {
         if panel == nil {
             let p = IslandPanel(frame: panelFrame)
             p.allowsKey = { [weak self] in
-                MainActor.assumeIsolated { self?.model.isExpanded == true && self?.model.page == .notes }
+                MainActor.assumeIsolated {
+                    guard let m = self?.model else { return false }
+                    return m.isShowingSettings || (m.isExpanded && m.page == .notes)
+                }
             }
             // Clicking anywhere else ends typing, and the island closes.
             NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.model.isTyping = false }
             }
-            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, openSettings: openSettings)
+            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer,
+                                      settings: settings, updater: updater, openSettings: openSettings)
             let host = FirstMouseHostingView(rootView: root)
             host.frame = NSRect(origin: .zero, size: size)
             host.autoresizingMask = [.width, .height]
@@ -215,16 +248,26 @@ final class IslandController {
             MainActor.assumeIsolated { self?.handleScroll(e) }
             return e
         }) { monitors.append(s) }
-        // Esc closes the open island (e.g. when done typing a note).
+        // Esc closes the open island or settings (e.g. when done typing a note).
         if let k = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
             guard e.keyCode == 53 else { return e }
             let handled = MainActor.assumeIsolated { () -> Bool in
-                guard let self, self.model.isExpanded else { return false }
+                guard let self else { return false }
+                if self.model.isShowingSettings { self.model.closeSettings(); return true }
+                guard self.model.isExpanded else { return false }
                 self.model.close()
                 return true
             }
             return handled ? nil : e
         }) { monitors.append(k) }
+        // A click anywhere else closes settings.
+        if let c = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.model.isShowingSettings,
+                      !self.hitRect().contains(NSEvent.mouseLocation) else { return }
+                self.model.closeSettings()
+            }
+        }) { monitors.append(c) }
     }
 
     private func updatePointer() {

@@ -11,7 +11,8 @@ A personal, Alcove-style notch app for your MacBook Pro. It's for your own use o
 - **Timer:** pick a preset or add minutes, then Start. While it runs, the countdown shows in orange beside the notch. When it's done, a "Timer done" pill drops down with a sound.
 - **Notes:** click and type. It saves automatically to `~/Library/Application Support/Ledge/Notes.txt`. The island stays open while you type. Press **Esc** or click elsewhere to close it.
 - **Indicators:** volume, brightness, plugging in the charger, and low battery (20%, 10%, 5%) all show in the notch.
-- **Settings and quit:** right-click the notch. Opening Ledge again from Applications or Spotlight also opens settings. Every page, indicator and behavior can be switched on or off there.
+- **Settings:** open Ledge from Spotlight or the Applications folder, or right-click the island and choose Ledge Settings. The island grows into a wide settings panel (it isn't one of the swipe pages). Switch any page, indicator or behavior on or off, pick an animation style, check for updates, or quit. Close it with ✕, Done, Esc, or a click anywhere else.
+- **Animation styles:** Morph and blur, Drop down, Stretch, or Calm (the default). Picking one replays the settings panel in that style. In every style the content only fades, so nothing shrinks or zooms.
 
 ## External displays
 
@@ -48,3 +49,4 @@ Quit Ledge (right-click the notch → Quit), delete `/Applications/Ledge.app`, a
 - `Bridge/`: the music bridge. macOS only shares now-playing info with Apple-signed programs, so Ledge runs a small library inside `/usr/bin/perl`, which is Apple-signed, to read it. This is the same workaround other notch apps use.
 - Log file: `~/Library/Logs/Ledge.log`.
 - `Ledge --snapshot DIR` draws every island state to PNG files using sample data.
+- Debug: posting the distributed notification `local.sabir.ledge.record` with `"<style>|<folder>"` makes Ledge play that animation on the notch and save it frame by frame.

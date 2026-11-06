@@ -9,7 +9,7 @@ enum Snapshot {
     static func render(to dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         Pref.registerDefaults()
-        renderSettings(to: dir)
+        SettingsPanel.scrolls = false
         let notch = NotchMetrics(width: 185, height: 32)
         let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
             ("f1-pill-idle", .idle, nil, false, .music),
@@ -29,6 +29,8 @@ enum Snapshot {
             ("7-charging", .hud, .charging(percent: 82), false, .music),
             ("8-low-battery", .hud, .lowBattery(percent: 10), false, .music),
             ("9-calendar", .expanded, nil, true, .calendar),
+            ("17-settings", .settings, nil, false, .music),
+            ("f9-pill-settings", .settings, nil, false, .music),
             ("12-timer-page-idle", .expanded, nil, false, .timer),
             ("13-timer-page-running", .expanded, nil, false, .timer),
             ("14-timer-compact", .compact, nil, false, .music),
@@ -88,7 +90,8 @@ enum Snapshot {
                                startPoint: .top, endPoint: .bottom)
                 // Menu bar strip, for context.
                 Color.white.opacity(0.06).frame(height: floating ? 25 : notch.height)
-                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, timer: timerStore, openSettings: {})
+                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, timer: timerStore,
+                               settings: SettingsState(), updater: Updater(), openSettings: {})
             }
             .frame(width: panel.width, height: panel.height)
 
@@ -98,22 +101,6 @@ enum Snapshot {
                let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
             }
-        }
-    }
-
-    /// The settings window, rendered in a real (offscreen) window so the form draws properly.
-    static func renderSettings(to dir: String) {
-        let view = SettingsView(state: SettingsState(), updater: Updater())
-        let host = NSHostingView(rootView: view)
-        let size = host.fittingSize
-        host.frame = NSRect(origin: .zero, size: size)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-            host.cacheDisplay(in: host.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/settings.png"))
         }
     }
 

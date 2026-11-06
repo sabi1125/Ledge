@@ -7,7 +7,8 @@ public enum IslandShape: Equatable, Sendable {
     case hover      // small bump when the pointer is over a resting island (click-to-open mode)
     case compact    // music playing
     case hud        // volume / brightness / battery
-    case expanded   // open: Music, Calendar, Notes
+    case expanded   // open: Music, Calendar, Timer, Notes
+    case settings   // Ledge's settings, opened from Spotlight or a right-click
 }
 
 /// Where the island lives.
@@ -50,6 +51,9 @@ public enum IslandLayout {
     /// Height of the open island's content area (below the notch or the top bar).
     public static let expandedBody: CGFloat = 140
     public static let expandedMinWidth: CGFloat = 420
+    /// The settings panel: wider than the open island, with two columns.
+    public static let settingsWidth: CGFloat = 640
+    public static let settingsBody: CGFloat = 378
     /// Height of the page bar at the top of an open floating island.
     public static let floatingTopBar: CGFloat = 28
     /// Gap between the top of the screen and a floating island.
@@ -87,6 +91,8 @@ public enum IslandLayout {
             case .expanded:
                 return CGSize(width: max(notch.width + 230, expandedMinWidth),
                               height: notch.height + expandedBody)
+            case .settings:
+                return CGSize(width: settingsWidth, height: notch.height + settingsBody)
             }
         case .floating:
             let h = notch.height
@@ -96,6 +102,7 @@ public enum IslandLayout {
             case .compact: return CGSize(width: compactWidth ?? (280 + (h - 18) * 3), height: h)
             case .hud: return CGSize(width: 230 + (h - 18) * 2, height: h)
             case .expanded: return CGSize(width: expandedMinWidth, height: floatingTopBar + expandedBody)
+            case .settings: return CGSize(width: settingsWidth, height: floatingTopBar + settingsBody)
             }
         }
     }
@@ -108,10 +115,10 @@ public enum IslandLayout {
             case .idle: return 10
             case .hover, .compact: return notch.height * 0.42
             case .hud: return 24
-            case .expanded: return 30
+            case .expanded, .settings: return 30
             }
         case .floating:
-            return shape == .expanded ? 26 : size(for: shape, notch: notch, style: style).height / 2
+            return shape == .expanded || shape == .settings ? 26 : size(for: shape, notch: notch, style: style).height / 2
         }
     }
 
@@ -124,7 +131,7 @@ public enum IslandLayout {
     /// like the real notch's shoulders. The floating pill has none.
     public static func shoulderRadius(for shape: IslandShape, style: IslandStyle = .notch) -> CGFloat {
         guard style == .notch else { return 0 }
-        return shape == .expanded ? 12 : 6
+        return shape == .expanded || shape == .settings ? 12 : 6
     }
 
     /// Space above the island inside its window.
@@ -135,9 +142,8 @@ public enum IslandLayout {
     /// The window that hosts the island never changes size; it's big enough
     /// for the largest shape plus its shadow.
     public static func panelSize(notch: NotchMetrics, style: IslandStyle = .notch) -> CGSize {
-        let expanded = size(for: .expanded, notch: notch, style: style)
-        let hud = size(for: .hud, notch: notch, style: style)
-        return CGSize(width: max(expanded.width, hud.width) + 120,
-                      height: expanded.height + topGap(style: style) + 50)
+        let biggest = [IslandShape.expanded, .hud, .settings].map { size(for: $0, notch: notch, style: style) }
+        return CGSize(width: biggest.map(\.width).max()! + 120,
+                      height: biggest.map(\.height).max()! + topGap(style: style) + 50)
     }
 }

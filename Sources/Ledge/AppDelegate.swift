@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let timer = TimerStore()
     private let updater = Updater()
     /// One island per screen: the notch on the MacBook, a floating pill on other displays.
-    private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes, timer: timer) { [weak self] in
+    private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes, timer: timer,
+                                             settings: settingsState, updater: updater) { [weak self] in
         self?.showSettings()
     }
     private let volume = VolumeMonitor()
@@ -21,7 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hider = MenuBarHider()
     private let keys = MediaKeyInterceptor()
     private let settingsState = SettingsState()
-    private var settingsWindow: NSWindow?
     private var revealHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -91,6 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.onHideIconsChanged = { [weak self] on in self?.hider.apply(enabled: on) }
         settingsState.requestAccessibility = { [weak self] in self?.hider.requestPermission() }
         settingsState.revealIcons = { [weak self] in self?.hider.reveal() }
+        settingsState.previewAnimation = { [weak self] in self?.islands.previewAnimation() }
+        // Debug only: `ledge-record <style> <folder>` records an animation for checking.
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.record"), object: nil, queue: .main) { [weak self] note in
+            guard let args = (note.object as? String)?.split(separator: "|").map(String.init), args.count == 2 else { return }
+            MainActor.assumeIsolated { self?.islands.debugRecord(style: args[0], to: args[1]) }
+        }
         if Pref.bool(Pref.hideMenuBarIcons) {
             // Give other apps a moment to add their icons after login.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -131,19 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Settings open inside the island (on the screen you're using), not in a separate window.
     func showSettings() {
         settingsState.launchAtLogin = LoginItem.isEnabled
         settingsState.hiderStatus = hider.status
-        if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView(state: settingsState, updater: updater))
-            let window = NSWindow(contentViewController: host)
-            window.title = "Ledge Settings"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        islands.showSettings()
     }
 }

@@ -19,6 +19,12 @@ final class IslandLayoutTests: XCTestCase {
         XCTAssertEqual(IslandLayout.size(for: .compact, notch: notch).height, notch.height)
     }
 
+    func testSettingsIsTheWidestShape() {
+        let settings = IslandLayout.size(for: .settings, notch: notch)
+        XCTAssertGreaterThan(settings.width, IslandLayout.size(for: .expanded, notch: notch).width)
+        XCTAssertGreaterThan(settings.height, IslandLayout.size(for: .expanded, notch: notch).height)
+    }
+
     func testHUDDropsBelowTheNotch() {
         let hud = IslandLayout.size(for: .hud, notch: notch)
         XCTAssertGreaterThan(hud.height, notch.height + 20)
@@ -28,7 +34,7 @@ final class IslandLayoutTests: XCTestCase {
 
     func testPanelFitsEveryShape() {
         let panel = IslandLayout.panelSize(notch: notch)
-        for shape: IslandShape in [.idle, .hover, .compact, .hud, .expanded] {
+        for shape: IslandShape in [.idle, .hover, .compact, .hud, .expanded, .settings] {
             let s = IslandLayout.size(for: shape, notch: notch)
             XCTAssertLessThanOrEqual(s.width + 2 * IslandLayout.shoulderRadius(for: shape), panel.width)
             XCTAssertLessThanOrEqual(s.height, panel.height)
@@ -72,7 +78,7 @@ final class FloatingLayoutTests: XCTestCase {
 
     func testPanelFitsEveryFloatingShape() {
         let panel = IslandLayout.panelSize(notch: pill, style: .floating)
-        for shape: IslandShape in [.idle, .hover, .compact, .hud, .expanded] {
+        for shape: IslandShape in [.idle, .hover, .compact, .hud, .expanded, .settings] {
             let s = IslandLayout.size(for: shape, notch: pill, style: .floating)
             XCTAssertLessThanOrEqual(s.width, panel.width)
             XCTAssertLessThanOrEqual(s.height + IslandLayout.floatingTopGap, panel.height)

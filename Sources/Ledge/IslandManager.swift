@@ -12,15 +12,19 @@ final class IslandManager {
     private let calendar: CalendarStore
     private let notes: NotesStore
     private let timer: TimerStore
+    private let settings: SettingsState
+    private let updater: Updater
     private let openSettings: () -> Void
     private var cancellables = Set<AnyCancellable>()
     private var lastShowOthers: Bool?
     private let fullScreen = FullScreenWatcher()
 
     init(media: MediaController, calendar: CalendarStore, notes: NotesStore, timer: TimerStore,
-         openSettings: @escaping () -> Void) {
+         settings: SettingsState, updater: Updater, openSettings: @escaping () -> Void) {
         self.media = media
         self.timer = timer
+        self.settings = settings
+        self.updater = updater
         self.calendar = calendar
         self.notes = notes
         self.openSettings = openSettings
@@ -76,7 +80,8 @@ final class IslandManager {
                 model.timerActive = timer.countdown.isActive
                 model.onOpen = { Haptics.openTick() }
                 let controller = IslandController(displayID: id, model: model, calendar: calendar, notes: notes,
-                                                  timer: timer, openSettings: openSettings)
+                                                  timer: timer, settings: settings, updater: updater,
+                                                  openSettings: openSettings)
                 controllers[id] = controller
                 controller.start(on: screen)
                 if model.style == .floating { apply(fullScreenRulesTo: controller) }
@@ -104,6 +109,29 @@ final class IslandManager {
         } else {
             c.setSuppressed(fullScreen.fullScreenDisplays.contains(c.displayID))
         }
+    }
+
+    /// Opens settings in the island on the screen you're using (the MacBook's notch if unsure).
+    func showSettings() {
+        let p = NSEvent.mouseLocation
+        let target = controllers.values.first { $0.contains(point: p) && !$0.isSuppressed }
+            ?? controllers.values.first { $0.model.style == .notch }
+            ?? controllers.values.first
+        for c in controllers.values where c !== target { c.model.closeSettings() }
+        target?.model.openSettings()
+    }
+
+    /// Debug only: plays a style's open and close on the notch while recording it.
+    func debugRecord(style: String, to dir: String) {
+        guard let c = controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return }
+        UserDefaults.standard.set(style, forKey: IslandAnimation.key)
+        c.recordFrames(to: dir)
+        c.model.previewAnimation()
+    }
+
+    /// Plays the open-and-close animation on the MacBook's notch (or the first island).
+    func previewAnimation() {
+        (controllers.values.first { $0.model.style == .notch } ?? controllers.values.first)?.model.previewAnimation()
     }
 
     /// The island on the screen you're using (where the pointer is), for indicators.
