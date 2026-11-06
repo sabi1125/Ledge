@@ -10,6 +10,7 @@ enum Snapshot {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         Pref.registerDefaults()
         SettingsPanel.scrolls = false
+        RightClickCatcher.enabled = false
         let notch = NotchMetrics(width: 185, height: 32)
         let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
             ("f1-pill-idle", .idle, nil, false, .music),
@@ -29,6 +30,10 @@ enum Snapshot {
             ("7-charging", .hud, .charging(percent: 82), false, .music),
             ("8-low-battery", .hud, .lowBattery(percent: 10), false, .music),
             ("9-calendar", .expanded, nil, true, .calendar),
+            ("18-awake-on", .expanded, nil, true, .music),
+            ("19-awake-menu", .expanded, nil, true, .music),
+            ("20-awake-pop-on", .hud, .awakeOn(minutes: 60), false, .music),
+            ("21-awake-pop-off", .hud, .awakeOff, false, .music),
             ("17-settings", .settings, nil, false, .music),
             ("f9-pill-settings", .settings, nil, false, .music),
             ("12-timer-page-idle", .expanded, nil, false, .timer),
@@ -57,6 +62,9 @@ enum Snapshot {
                          isAllDay: false, color: .purple, joinURL: nil),
         ]
         for (name, shape, hud, playing, page) in cases {
+            let awakeStore = AwakeStore()
+            if name.contains("awake-on") { awakeStore.start(minutes: 60) }
+            ExpandedView.snapshotMenu = name.contains("awake-menu")
             let timerStore = TimerStore()
             if name.contains("timer") {
                 timerStore.choose(minutes: 25)
@@ -90,7 +98,7 @@ enum Snapshot {
                                startPoint: .top, endPoint: .bottom)
                 // Menu bar strip, for context.
                 Color.white.opacity(0.06).frame(height: floating ? 25 : notch.height)
-                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, timer: timerStore,
+                IslandRootView(model: model, calendar: calendarStore, notes: notesStore, timer: timerStore, awake: awakeStore,
                                settings: SettingsState(), updater: Updater(), openSettings: {})
             }
             .frame(width: panel.width, height: panel.height)

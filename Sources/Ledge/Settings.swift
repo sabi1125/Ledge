@@ -16,6 +16,9 @@ enum Pref {
     static let pageTimer = "pageTimer"
     static let pageNotes = "pageNotes"
     static let haptics = "haptics"
+    static let awakeDefaultMinutes = "awakeDefaultMinutes"
+    static let awakeKeepScreenOn = "awakeKeepScreenOn"
+    static let awakeWhileCharging = "awakeWhileCharging"
 
     /// The island pages switched on in settings (Music uses "Show what's playing").
     static var enabledPages: Set<IslandPage> {
@@ -40,6 +43,9 @@ enum Pref {
             pageTimer: true,
             pageNotes: true,
             haptics: true,
+            awakeDefaultMinutes: 60,
+            awakeKeepScreenOn: true,
+            awakeWhileCharging: false,
         ])
     }
 

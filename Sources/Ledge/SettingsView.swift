@@ -37,6 +37,10 @@ struct SettingsPanel: View {
     @AppStorage(Pref.hideMenuBarIcons) private var hideIcons = true
     // Animation
     @AppStorage(IslandAnimation.key) private var animation = IslandAnimation.calm.rawValue
+    // Stay awake
+    @AppStorage(Pref.awakeDefaultMinutes) private var awakeMinutes = 60
+    @AppStorage(Pref.awakeKeepScreenOn) private var awakeScreenOn = true
+    @AppStorage(Pref.awakeWhileCharging) private var awakeCharging = false
 
     /// The snapshot tool can't draw scroll views, so it turns this off.
     static var scrolls = true
@@ -72,6 +76,7 @@ struct SettingsPanel: View {
                             SwitchRow(title: "Trackpad tick", symbol: "hand.tap", isOn: $haptics)
                             SwitchRow(title: "Show on other displays", symbol: "display.2", isOn: $showOnOtherDisplays)
                         }
+
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -85,6 +90,36 @@ struct SettingsPanel: View {
                             }
                         }
                         group("Updates") { updatesRow }
+                        group("Stay awake") {
+                            HStack(spacing: 9) {
+                                Image(systemName: "cup.and.saucer")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Theme.secondaryText).frame(width: 16)
+                                Text("Default length").font(.system(size: 12.5)).foregroundStyle(.white)
+                                Spacer(minLength: 8)
+                                Menu {
+                                    ForEach(AwakeStore.lengths, id: \.self) { m in
+                                        Button(m == 0 ? "Until I turn it off" : describeAwakeLength(minutes: m)) { awakeMinutes = m }
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text(awakeMinutes == 0 ? "Until off" : describeAwakeLength(minutes: awakeMinutes))
+                                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                                    }
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 10).frame(height: 21)
+                                    .background(Capsule().fill(Color(white: 0.2)))
+                                }
+                                .menuStyle(.button)
+                                .buttonStyle(.plain)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                            }
+                            .frame(height: 24)
+                            SwitchRow(title: "Keep the screen on too", symbol: "display", isOn: $awakeScreenOn)
+                            SwitchRow(title: "Stay awake while charging", symbol: "bolt.fill", isOn: $awakeCharging)
+                        }
                         group("General") {
                             SwitchRow(title: "Open at login", symbol: "power", isOn: $state.launchAtLogin)
                                 .onChange(of: state.launchAtLogin) { _, value in

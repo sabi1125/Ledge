@@ -10,10 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let calendar = CalendarStore()
     private let notes = NotesStore()
     private let timer = TimerStore()
+    private let awake = AwakeStore()
     private let updater = Updater()
     /// One island per screen: the notch on the MacBook, a floating pill on other displays.
     private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes, timer: timer,
-                                             settings: settingsState, updater: updater) { [weak self] in
+                                             awake: awake, settings: settingsState, updater: updater) { [weak self] in
         self?.showSettings()
     }
     private let volume = VolumeMonitor()
@@ -31,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         islands.start()
         media.start()
+        // Stay awake: a short pop when it turns on or off.
+        awake.onStart = { [weak self] minutes in self?.showIndicator(.awakeOn(minutes: minutes)) }
+        awake.onEnd = { [weak self] in self?.showIndicator(.awakeOff) }
         timer.onFinish = { [weak self] in
             guard let self else { return }
             self.showIndicator(.timerDone(duration: self.timer.countdown.duration))
@@ -60,6 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case let .pluggedIn(p): self?.showIndicator(.charging(percent: p))
             case let .low(p): self?.showIndicator(.lowBattery(percent: p))
             }
+        }
+        battery.onPowerChange = { [weak self] onPower in
+            MainActor.assumeIsolated { self?.awake.powerChanged(onPower: onPower) }
         }
         battery.start()
 

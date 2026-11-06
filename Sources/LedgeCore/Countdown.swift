@@ -87,3 +87,20 @@ public func formatCountdown(_ seconds: TimeInterval) -> String {
     let h = total / 3600, m = (total % 3600) / 60, s = total % 60
     return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
 }
+
+/// Stay-awake time left, short enough for the cup button: "58m", "1h 20m", "2h".
+public func formatAwakeRemaining(_ seconds: TimeInterval) -> String {
+    let minutes = max(1, Int((seconds / 60).rounded(.up)))
+    if minutes < 60 { return "\(minutes)m" }
+    let h = minutes / 60, m = minutes % 60
+    return m == 0 ? "\(h)h" : "\(h)h\(m)m"
+}
+
+/// Stay-awake length as words, for the pop and the menu: "1 h", "30 min", "until you turn it off".
+public func describeAwakeLength(minutes: Int) -> String {
+    switch minutes {
+    case ..<1: return "until off"
+    case ..<60: return "\(minutes) min"
+    default: return minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
+    }
+}

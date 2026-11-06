@@ -192,11 +192,14 @@ final class BrightnessMonitor {
 
 final class BatteryMonitor {
     var onEvent: ((BatteryEvent) -> Void)?
+    /// Called on launch and whenever the charger is plugged in or out.
+    var onPowerChange: ((Bool) -> Void)?
     private var last: BatterySnapshot?
     private var source: CFRunLoopSource?
 
     func start() {
         last = Self.read()
+        if let last { onPowerChange?(last.onPower) }
         let context = Unmanaged.passUnretained(self).toOpaque()
         guard let src = IOPSNotificationCreateRunLoopSource({ ctx in
             guard let ctx else { return }
@@ -209,6 +212,7 @@ final class BatteryMonitor {
     private func changed() {
         guard let now = Self.read() else { return }
         if let event = BatteryRules.event(from: last, to: now) { onEvent?(event) }
+        if last?.onPower != now.onPower { onPowerChange?(now.onPower) }
         last = now
     }
 

@@ -10,6 +10,8 @@ enum HUD: Equatable {
     case charging(percent: Int)
     case lowBattery(percent: Int)
     case timerDone(duration: TimeInterval)
+    case awakeOn(minutes: Int)
+    case awakeOff
 }
 
 /// Everything the island view needs to draw itself.
@@ -122,6 +124,7 @@ final class IslandModel: ObservableObject {
         case .volume, .brightness: seconds = 1.5
         case .charging, .lowBattery: seconds = 2.6
         case .timerDone: seconds = 6
+        case .awakeOn, .awakeOff: seconds = 1.8
         }
         hudTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             Task { @MainActor in

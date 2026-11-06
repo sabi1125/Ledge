@@ -45,6 +45,7 @@ final class IslandController {
     let calendar: CalendarStore
     let notes: NotesStore
     let timer: TimerStore
+    let awake: AwakeStore
     let settings: SettingsState
     let updater: Updater
     private var panel: IslandPanel?
@@ -57,8 +58,10 @@ final class IslandController {
     private let openSettings: () -> Void
 
     init(displayID: CGDirectDisplayID, model: IslandModel, calendar: CalendarStore, notes: NotesStore,
-         timer: TimerStore, settings: SettingsState, updater: Updater, openSettings: @escaping () -> Void) {
+         timer: TimerStore, awake: AwakeStore, settings: SettingsState, updater: Updater,
+         openSettings: @escaping () -> Void) {
         self.timer = timer
+        self.awake = awake
         self.settings = settings
         self.updater = updater
         self.displayID = displayID
@@ -177,7 +180,7 @@ final class IslandController {
             NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.model.isTyping = false }
             }
-            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer,
+            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake,
                                       settings: settings, updater: updater, openSettings: openSettings)
             let host = FirstMouseHostingView(rootView: root)
             host.frame = NSRect(origin: .zero, size: size)

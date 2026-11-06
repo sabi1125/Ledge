@@ -47,6 +47,7 @@ struct IslandRootView: View {
     var calendar: CalendarStore
     var notes: NotesStore
     var timer: TimerStore
+    var awake: AwakeStore
     var settings: SettingsState
     var updater: Updater
     var openSettings: () -> Void
@@ -153,7 +154,7 @@ struct IslandRootView: View {
                     .transition(Self.fade)
             }
         case .expanded:
-            ExpandedView(model: model, calendar: calendar, notes: notes, timer: timer)
+            ExpandedView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake)
                 .fixedFrame(for: .expanded, model: model)
                 .transition(Self.fade)
         case .settings:
@@ -270,31 +271,40 @@ struct TimerBadge: View {
 struct PlayerView: View {
     @ObservedObject var model: IslandModel
 
+    /// Big art on the left; song, progress and controls in one column beside it,
+    /// so the wide island has no empty stretches.
+    private let art: CGFloat = 104
+
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                HStack(spacing: 12) {
-                    ArtworkView(image: model.artwork, size: 56, radius: 12)
-                    VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .center, spacing: 16) {
+            ArtworkView(image: model.artwork, size: art, radius: 16)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(model.media.title ?? "")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white)
                         Text(subtitle)
-                            .font(.system(size: 12.5))
+                            .font(.system(size: 13))
                             .foregroundStyle(Theme.secondaryText)
                     }
                     .lineLimit(1)
                     Spacer(minLength: 8)
                     WaveformView(color: model.tint, playing: model.media.isPlaying)
-                        .frame(width: 26, height: 18)
+                        .frame(width: 24, height: 16)
+                        .padding(.top, 3)
                 }
+                Spacer(minLength: 6)
                 ProgressRow(model: model)
+                Spacer(minLength: 4)
                 ControlsRow(model: model)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 4)
-            .padding(.bottom, 14)
+            .frame(height: art)
         }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var subtitle: String {
@@ -449,6 +459,22 @@ struct HUDView: View {
         case let .lowBattery(percent):
             statusRow(symbol: "exclamationmark.triangle.fill", title: "Low Battery", percent: percent,
                       battery: "battery.25percent", color: Theme.amber)
+        case let .awakeOn(minutes):
+            HStack(spacing: 7 * k) {
+                Image(systemName: "cup.and.saucer.fill").font(.system(size: 12 * k, weight: .semibold))
+                Text("Staying awake").font(.system(size: 12.5 * k, weight: .semibold))
+                Spacer(minLength: 8)
+                Text(minutes > 0 ? describeAwakeLength(minutes: minutes) : "until off")
+                    .font(.system(size: 12.5 * k, weight: .semibold).monospacedDigit())
+            }
+            .foregroundStyle(Theme.awakeOrange)
+        case .awakeOff:
+            HStack(spacing: 7 * k) {
+                Image(systemName: "moon.fill").font(.system(size: 12 * k, weight: .semibold))
+                Text("Sleep allowed again").font(.system(size: 12.5 * k, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color(white: 0.75))
         case let .timerDone(duration):
             HStack(spacing: 7 * k) {
                 Image(systemName: "bell.fill").font(.system(size: 12 * k, weight: .semibold))

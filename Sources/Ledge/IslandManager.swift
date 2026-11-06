@@ -12,6 +12,7 @@ final class IslandManager {
     private let calendar: CalendarStore
     private let notes: NotesStore
     private let timer: TimerStore
+    private let awake: AwakeStore
     private let settings: SettingsState
     private let updater: Updater
     private let openSettings: () -> Void
@@ -20,9 +21,10 @@ final class IslandManager {
     private let fullScreen = FullScreenWatcher()
 
     init(media: MediaController, calendar: CalendarStore, notes: NotesStore, timer: TimerStore,
-         settings: SettingsState, updater: Updater, openSettings: @escaping () -> Void) {
+         awake: AwakeStore, settings: SettingsState, updater: Updater, openSettings: @escaping () -> Void) {
         self.media = media
         self.timer = timer
+        self.awake = awake
         self.settings = settings
         self.updater = updater
         self.calendar = calendar
@@ -80,7 +82,7 @@ final class IslandManager {
                 model.timerActive = timer.countdown.isActive
                 model.onOpen = { Haptics.openTick() }
                 let controller = IslandController(displayID: id, model: model, calendar: calendar, notes: notes,
-                                                  timer: timer, settings: settings, updater: updater,
+                                                  timer: timer, awake: awake, settings: settings, updater: updater,
                                                   openSettings: openSettings)
                 controllers[id] = controller
                 controller.start(on: screen)

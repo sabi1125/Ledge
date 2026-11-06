@@ -9,10 +9,29 @@ struct ExpandedView: View {
     @ObservedObject var calendar: CalendarStore
     @ObservedObject var notes: NotesStore
     @ObservedObject var timer: TimerStore
+    @ObservedObject var awake: AwakeStore
+    @State private var showAwakeMenu = ExpandedView.snapshotMenu
+    /// For the snapshot tool only.
+    static var snapshotMenu = false
 
     var body: some View {
+        ZStack(alignment: .topTrailing) {
+            pages
+            if showAwakeMenu {
+                // A click anywhere else in the island closes the menu.
+                Color.black.opacity(0.001)
+                    .onTapGesture { withAnimation(Theme.quick) { showAwakeMenu = false } }
+                AwakeMenu(awake: awake) { withAnimation(Theme.quick) { showAwakeMenu = false } }
+                    .padding(.top, (model.style == .notch ? model.notch.height : IslandLayout.floatingTopBar) - 2)
+                    .padding(.trailing, 14)
+                    .transition(.opacity.combined(with: .offset(y: -6)))
+            }
+        }
+    }
+
+    private var pages: some View {
         VStack(spacing: 0) {
-            TopBar(model: model)
+            TopBar(model: model, awake: awake) { withAnimation(Theme.quick) { showAwakeMenu.toggle() } }
             // A carousel: every page sits side by side and the row slides to the current one,
             // so the motion always follows your swipe.
             GeometryReader { geo in
@@ -44,9 +63,11 @@ struct ExpandedView: View {
     }
 }
 
-/// Sits beside the notch: page name on the left, page dots on the right.
+/// Sits beside the notch: page name on the left; the stay-awake cup and page dots on the right.
 struct TopBar: View {
     @ObservedObject var model: IslandModel
+    @ObservedObject var awake: AwakeStore
+    var showAwakeMenu: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -56,6 +77,9 @@ struct TopBar: View {
                 .labelStyle(.titleAndIcon)
                 .contentTransition(.opacity)
             Spacer(minLength: model.style == .notch ? model.notch.width + 12 : 12)
+            AwakeCup(awake: awake, showMenu: showAwakeMenu)
+                .fixedSize()
+                .padding(.trailing, 8)
             HStack(spacing: 6) {
                 ForEach(model.pages, id: \.self) { p in
                     Circle()
@@ -270,7 +294,7 @@ struct TimerPage: View {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(formatCountdown(c.remaining(at: context.date)))
-                        .font(.system(size: 40, weight: .semibold).monospacedDigit())
+                        .font(.system(size: 50, weight: .semibold).monospacedDigit())
                         .foregroundStyle(c.phase == .finished ? Theme.timerOrange : .white)
                         .contentTransition(.numericText(countsDown: true))
                         .animation(Theme.quick, value: Int(c.remaining(at: context.date)))
@@ -289,9 +313,9 @@ struct TimerPage: View {
                 Spacer(minLength: 8)
                 presets(c)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 4)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 26)
+            .padding(.bottom, 10)
+            .frame(maxHeight: .infinity, alignment: .center)
         }
     }
 
@@ -310,8 +334,8 @@ struct TimerPage: View {
     }
 
     private func presets(_ c: Countdown) -> some View {
-        let columns = Array(repeating: GridItem(.fixed(44), spacing: 6), count: 3)
-        return LazyVGrid(columns: columns, spacing: 6) {
+        let columns = Array(repeating: GridItem(.fixed(58), spacing: 8), count: 3)
+        return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(TimerStore.presets, id: \.self) { minutes in
                 let selected = !c.isActive && Int(c.duration) == minutes * 60
                 Button("\(minutes)m") { timer.choose(minutes: minutes) }
@@ -320,7 +344,7 @@ struct TimerPage: View {
                     .opacity(c.isActive ? 0.35 : 1)
             }
         }
-        .frame(width: 44 * 3 + 12)
+        .frame(width: 58 * 3 + 16)
     }
 
     private func status(_ c: Countdown, now: Date) -> String {
@@ -357,9 +381,9 @@ struct PresetButtonStyle: ButtonStyle {
     var selected: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            .font(.system(size: 12.5, weight: .semibold).monospacedDigit())
             .foregroundStyle(selected ? Color.black : Color.white)
-            .frame(width: 44, height: 28)
+            .frame(width: 58, height: 32)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(selected ? Theme.timerOrange : Color(white: 0.16)))
             .opacity(configuration.isPressed ? 0.7 : 1)
@@ -379,5 +403,117 @@ struct CountdownLabel: View {
                 .lineLimit(1)
                 .fixedSize()
         }
+    }
+}
+
+
+// MARK: - Stay awake
+
+/// The coffee cup beside the page dots. Click: stay awake for the default length (or turn off).
+/// Right-click or hold: pick a length.
+struct AwakeCup: View {
+    @ObservedObject var awake: AwakeStore
+    var showMenu: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 20)) { context in
+            HStack(spacing: 4) {
+                Image(systemName: awake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+                    .font(.system(size: 10.5, weight: .semibold))
+                if let left = awake.remaining(at: context.date) {
+                    Text(formatAwakeRemaining(left))
+                        .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                }
+            }
+            .foregroundStyle(awake.isOn ? Theme.awakeOrange : Theme.secondaryText)
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(Capsule().fill(awake.isOn ? Theme.awakeOrange.opacity(0.18) : Color(white: 0.13)))
+            .contentShape(Capsule())
+            .overlay { if RightClickCatcher.enabled { RightClickCatcher(action: showMenu) } }
+            .onTapGesture { withAnimation(Theme.quick) { awake.toggle() } }
+            .onLongPressGesture(minimumDuration: 0.35) { showMenu() }
+            .help(awake.isOn ? "Staying awake. Click to turn off, right-click for lengths" : "Keep your Mac awake. Right-click for lengths")
+            .animation(Theme.quick, value: awake.isOn)
+        }
+    }
+}
+
+/// "Keep awake for…" menu, drawn inside the island.
+struct AwakeMenu: View {
+    @ObservedObject var awake: AwakeStore
+    var close: () -> Void
+    @AppStorage(Pref.awakeDefaultMinutes) private var defaultMinutes = 60
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("KEEP AWAKE FOR")
+                .font(.system(size: 9, weight: .bold)).tracking(0.5)
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.horizontal, 8).padding(.top, 3).padding(.bottom, 3)
+            ForEach(AwakeStore.lengths, id: \.self) { minutes in
+                item(minutes == 0 ? "Until I turn it off" : describeAwakeLength(minutes: minutes)
+                        .replacingOccurrences(of: " min", with: " minutes").replacingOccurrences(of: " h", with: minutes == 60 ? " hour" : " hours"),
+                     checked: minutes == defaultMinutes) {
+                    awake.start(minutes: minutes)
+                    close()
+                }
+            }
+            if awake.isOn {
+                Rectangle().fill(Color(white: 0.22)).frame(height: 0.5).padding(.vertical, 3).padding(.horizontal, 6)
+                item("Turn off", checked: false, dim: true) {
+                    awake.stop()
+                    close()
+                }
+            }
+        }
+        .padding(4)
+        .frame(width: 158)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color(white: 0.11)))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color(white: 0.2), lineWidth: 0.5))
+    }
+
+    private func item(_ title: String, checked: Bool, dim: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(.system(size: 11.5)).foregroundStyle(dim ? Theme.secondaryText : .white)
+                Spacer()
+                if checked { Image(systemName: "checkmark").font(.system(size: 9.5, weight: .bold)).foregroundStyle(.white) }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 20)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MenuRowStyle())
+    }
+}
+
+struct MenuRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0)))
+    }
+}
+
+/// Catches right-clicks on a SwiftUI view (and lets every other click pass through).
+struct RightClickCatcher: NSViewRepresentable {
+    var action: () -> Void
+    /// The snapshot tool can't draw AppKit views, so it turns this off.
+    static var enabled = true
+
+    func makeNSView(context: Context) -> RightClickView {
+        let view = RightClickView()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: RightClickView, context: Context) { view.action = action }
+
+    final class RightClickView: NSView {
+        var action: (() -> Void)?
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            NSApp.currentEvent?.type == .rightMouseDown ? super.hitTest(point) : nil
+        }
+        override func rightMouseDown(with event: NSEvent) { action?() }
     }
 }

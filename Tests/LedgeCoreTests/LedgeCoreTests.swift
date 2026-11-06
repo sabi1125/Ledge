@@ -234,6 +234,22 @@ final class CountdownTests: XCTestCase {
     }
 }
 
+final class AwakeFormatTests: XCTestCase {
+    func testRemaining() {
+        XCTAssertEqual(formatAwakeRemaining(57 * 60 + 10), "58m")
+        XCTAssertEqual(formatAwakeRemaining(80 * 60), "1h20m")
+        XCTAssertEqual(formatAwakeRemaining(120 * 60), "2h")
+        XCTAssertEqual(formatAwakeRemaining(5), "1m") // never "0m" while still on
+    }
+
+    func testLength() {
+        XCTAssertEqual(describeAwakeLength(minutes: 0), "until off")
+        XCTAssertEqual(describeAwakeLength(minutes: 30), "30 min")
+        XCTAssertEqual(describeAwakeLength(minutes: 60), "1 h")
+        XCTAssertEqual(describeAwakeLength(minutes: 90), "1 h 30 min")
+    }
+}
+
 final class MeetingLinkTests: XCTestCase {
     func testFindsZoomInNotes() {
         let url = MeetingLink.find(in: [nil, "Agenda\nJoin: https://acme.zoom.us/j/123456789?pwd=abc (passcode 1)"])
