@@ -6,11 +6,11 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let model = IslandModel()
-    private lazy var media = MediaController(model: model)
+    private let media = MediaController()
     private let calendar = CalendarStore()
     private let notes = NotesStore()
-    private lazy var island = IslandController(model: model, calendar: calendar, notes: notes) { [weak self] in
+    /// One island per screen: the notch on the MacBook, a floating pill on other displays.
+    private lazy var islands = IslandManager(media: media, calendar: calendar, notes: notes) { [weak self] in
         self?.showSettings()
     }
     private let volume = VolumeMonitor()
@@ -27,13 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         LedgeLog.shared.write("Ledge \(version) started")
 
-        model.onCommand = { [weak self] in self?.media.send($0) }
-        island.start()
+        islands.start()
         media.start()
 
         volume.onChange = { [weak self] level, muted in
             guard Pref.bool(Pref.showVolume) else { return }
-            self?.model.show(.volume(level: level, muted: muted))
+            self?.showIndicator(.volume(level: level, muted: muted))
         }
         volume.start()
 
@@ -44,15 +43,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         brightness.onChange = { [weak self] level in
             guard Pref.bool(Pref.showBrightness) else { return }
-            self?.model.show(.brightness(level: level))
+            self?.showIndicator(.brightness(level: level))
         }
         brightness.start()
 
         battery.onEvent = { [weak self] event in
             guard Pref.bool(Pref.showBattery) else { return }
             switch event {
-            case let .pluggedIn(p): self?.model.show(.charging(percent: p))
-            case let .low(p): self?.model.show(.lowBattery(percent: p))
+            case let .pluggedIn(p): self?.showIndicator(.charging(percent: p))
+            case let .low(p): self?.showIndicator(.lowBattery(percent: p))
             }
         }
         battery.start()
@@ -106,6 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LoginItem.set(true) // start at login by default
             settingsState.launchAtLogin = LoginItem.isEnabled
         }
+    }
+
+    /// Indicators pop up only on the screen you're using.
+    private func showIndicator(_ hud: HUD) {
+        islands.islandUnderPointer()?.show(hud)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -36,6 +36,50 @@ final class IslandLayoutTests: XCTestCase {
     }
 }
 
+final class FloatingLayoutTests: XCTestCase {
+    let pill = NotchMetrics.floatingPill(menuBarHeight: 25)
+
+    func testPillFitsInsideTheMenuBar() {
+        XCTAssertLessThanOrEqual(pill.height + IslandLayout.floatingTopGap, 25)
+        XCTAssertGreaterThan(NotchMetrics.floatingPill(menuBarHeight: 0).height, pill.height) // no menu bar: roomier
+    }
+
+    func testCollapsedShapesStayInTheMenuBar() {
+        for shape: IslandShape in [.idle, .compact, .hud] {
+            XCTAssertEqual(IslandLayout.size(for: shape, notch: pill, style: .floating).height, pill.height)
+        }
+    }
+
+    func testPillIsRoundAllOverAndHasNoShoulders() {
+        for shape: IslandShape in [.idle, .compact, .hud, .expanded] {
+            XCTAssertEqual(IslandLayout.topRadius(for: shape, notch: pill, style: .floating),
+                           IslandLayout.bottomRadius(for: shape, notch: pill, style: .floating))
+            XCTAssertEqual(IslandLayout.shoulderRadius(for: shape, style: .floating), 0)
+        }
+        XCTAssertEqual(IslandLayout.topRadius(for: .expanded, notch: .fallback, style: .notch), 0)
+    }
+
+    func testMusicPillFitsItsContent() {
+        let short = IslandLayout.floatingCompactWidth(textWidth: 60, height: 28)
+        let long = IslandLayout.floatingCompactWidth(textWidth: 400, height: 28)
+        XCTAssertLessThan(short, long)
+        XCTAssertLessThanOrEqual(long, 350)                  // capped
+        XCTAssertGreaterThanOrEqual(short, 28 * 6)           // never tiny
+        let m = IslandLayout.floatingCompactMetrics(height: 28)
+        XCTAssertGreaterThan(m.leading, (28 - m.art) / 2)    // art sits further in than its top/bottom gap
+        XCTAssertGreaterThan(m.trailing, m.leading)          // bars a touch further in
+    }
+
+    func testPanelFitsEveryFloatingShape() {
+        let panel = IslandLayout.panelSize(notch: pill, style: .floating)
+        for shape: IslandShape in [.idle, .hover, .compact, .hud, .expanded] {
+            let s = IslandLayout.size(for: shape, notch: pill, style: .floating)
+            XCTAssertLessThanOrEqual(s.width, panel.width)
+            XCTAssertLessThanOrEqual(s.height + IslandLayout.floatingTopGap, panel.height)
+        }
+    }
+}
+
 final class NowPlayingTests: XCTestCase {
     func testParsesBridgeInfoLine() throws {
         let art = Data([1, 2, 3]).base64EncodedString()

@@ -1,10 +1,16 @@
 import AppKit
 import LedgeCore
 
-/// Runs the media bridge (see Bridge/MediaBridge.m) and feeds what's playing into the island.
+/// Runs the media bridge (see Bridge/MediaBridge.m) and feeds what's playing into every island
+/// (one per screen). Music state lives here; the islands only show it.
 @MainActor
 final class MediaController {
-    private let model: IslandModel
+    /// The islands to update (one per screen; they come and go with displays).
+    var islands: () -> [IslandModel] = { [] }
+    /// What's playing, including Ledge's own optimistic updates.
+    private(set) var current = NowPlayingState()
+    private var artworkImage: NSImage?
+    private var artworkTint = Theme.defaultTint
     private var process: Process?
     private var input: Pipe?
     private var lastReported: NowPlayingState?
@@ -18,8 +24,22 @@ final class MediaController {
     private var restarts = 0
     private var startedAt = Date()
 
-    init(model: IslandModel) {
-        self.model = model
+    /// Brings a newly created island up to date.
+    func sync(_ island: IslandModel) {
+        island.setArtwork(image: artworkImage, tint: artworkTint)
+        island.media = current
+    }
+
+    private func publish(_ state: NowPlayingState) {
+        current = state
+        for island in islands() { island.media = state }
+    }
+
+    private func setArtwork(_ data: Data?) {
+        let image = data.flatMap { NSImage(data: $0) }
+        artworkImage = image
+        artworkTint = image.flatMap { ArtworkColor.tint(for: $0) } ?? Theme.defaultTint
+        for island in islands() { island.setArtwork(image: artworkImage, tint: artworkTint) }
     }
 
     private var bridgeFiles: (script: String, library: String)? {
@@ -96,12 +116,12 @@ final class MediaController {
             }
             lastReported = state
             var state = state
-            if let held = heldPlaying, Date() < held.until, state.title == model.media.title {
+            if let held = heldPlaying, Date() < held.until, state.title == current.title {
                 if state.isPlaying == held.value {
                     heldPlaying = nil // confirmed
                 } else {
                     state.isPlaying = held.value
-                    state.elapsed = model.media.elapsed(at: Date())
+                    state.elapsed = current.elapsed(at: Date())
                     state.timestamp = Date()
                 }
             }
@@ -114,14 +134,14 @@ final class MediaController {
             if state.artworkID != artworkID {
                 if let id = state.artworkID, let data = artwork ?? artworkCache[id] {
                     artworkID = id
-                    model.setArtwork(data)
+                    setArtwork(data)
                     LedgeLog.shared.write("artwork: showing \(id) (\(data.count / 1024) KB)")
                 } else if state.artworkID == nil {
                     // Players briefly drop the artwork around play/pause. Keep the picture while
                     // it's still the same track; clear it only when the track changed.
-                    if state.title != model.media.title || state.artist != model.media.artist {
+                    if state.title != current.title || state.artist != current.artist {
                         artworkID = nil
-                        model.setArtwork(nil)
+                        setArtwork(nil)
                         LedgeLog.shared.write("artwork: none for this track")
                     }
                 } else {
@@ -129,7 +149,7 @@ final class MediaController {
                     requestRefresh()
                 }
             }
-            model.media = state
+            publish(state)
         case let .error(message):
             NSLog("Ledge: media bridge error: \(message)")
         case .ready, nil:
@@ -140,7 +160,7 @@ final class MediaController {
     // MARK: Commands
 
     func send(_ command: MediaCommand) {
-        var media = model.media
+        var media = current
         let name: String
         var arg: String?
         switch command {
@@ -167,7 +187,7 @@ final class MediaController {
             media.elapsed = seconds
             media.timestamp = Date()
         }
-        model.media = media
+        publish(media)
         LedgeLog.shared.write("command: \(name)\(arg.map { " \($0)" } ?? "")")
 
         guard let files = bridgeFiles else { return }

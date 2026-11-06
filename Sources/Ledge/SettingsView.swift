@@ -19,12 +19,16 @@ struct SettingsView: View {
     @AppStorage(Pref.showBattery) private var showBattery = true
     @AppStorage(Pref.openOnHover) private var openOnHover = true
     @AppStorage(Pref.hideMenuBarIcons) private var hideIcons = true
+    @AppStorage(Pref.showOnOtherDisplays) private var showOnOtherDisplays = true
 
     var body: some View {
         Form {
             Section("Island") {
                 Toggle("Show what's playing", isOn: $showMusic)
                 Toggle("Open the player when the pointer is over the notch", isOn: $openOnHover)
+                Toggle("Show Ledge on other displays", isOn: $showOnOtherDisplays)
+                Text("Screens without a notch get a floating pill in the middle of the menu bar.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text(openOnHover ? "You can also click the island to open or close it." : "Click the island to open or close it.")
                     .font(.caption).foregroundStyle(.secondary)
             }

@@ -10,6 +10,7 @@ enum Pref {
     static let openOnHover = "openOnHover"
     static let hideMenuBarIcons = "hideMenuBarIcons"
     static let didFirstLaunch = "didFirstLaunch"
+    static let showOnOtherDisplays = "showOnOtherDisplays"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -19,6 +20,7 @@ enum Pref {
             showBattery: true,
             openOnHover: true,
             hideMenuBarIcons: true,
+            showOnOtherDisplays: true,
         ])
     }
 

@@ -36,33 +36,34 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// Owns the panel, keeps it on the notched screen, and turns pointer
-/// movement into hover, clicks-through and swipes.
+/// Owns one screen's island panel, and turns pointer movement into hover,
+/// clicks-through and swipes. `IslandManager` keeps one per screen.
 @MainActor
 final class IslandController {
+    let displayID: CGDirectDisplayID
     let model: IslandModel
     let calendar: CalendarStore
     let notes: NotesStore
     private var panel: IslandPanel?
-    private var notchRect: NSRect = .zero // in global screen coordinates
+    /// The resting island (the notch, or the idle pill), in global screen coordinates.
+    private var anchorRect: NSRect = .zero
+    private var screenTop: CGFloat = 0
     private var monitors: [Any] = []
     private var swipe = SwipeDetector()
     private var cancellables = Set<AnyCancellable>()
     private let openSettings: () -> Void
 
-    init(model: IslandModel, calendar: CalendarStore, notes: NotesStore, openSettings: @escaping () -> Void) {
+    init(displayID: CGDirectDisplayID, model: IslandModel, calendar: CalendarStore, notes: NotesStore,
+         openSettings: @escaping () -> Void) {
+        self.displayID = displayID
         self.model = model
         self.calendar = calendar
         self.notes = notes
         self.openSettings = openSettings
     }
 
-    func start() {
-        layout()
-        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.layout() }
-            .store(in: &cancellables)
+    func start(on screen: NSScreen) {
+        layout(on: screen)
         // Re-check the pointer when the shape changes (e.g. the island collapses under a still pointer).
         model.$shape
             .receive(on: RunLoop.main)
@@ -78,29 +79,60 @@ final class IslandController {
         }
     }
 
+    func stop() {
+        for m in monitors { NSEvent.removeMonitor(m) }
+        monitors = []
+        cancellables = []
+        panel?.orderOut(nil)
+        panel?.close()
+        panel = nil
+    }
+
     // MARK: Screen
 
     static func notchedScreen() -> NSScreen? {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 && $0.auxiliaryTopLeftArea != nil }
+        NSScreen.screens.first { hasNotch($0) }
     }
 
-    private func layout() {
-        guard let screen = Self.notchedScreen(),
-              let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea else {
-            // No notch visible (e.g. lid closed on an external display): stay hidden.
-            panel?.orderOut(nil)
-            return
-        }
-        let frame = screen.frame
-        let notchWidth = frame.width - left.width - right.width
-        let metrics = NotchMetrics(width: notchWidth, height: screen.safeAreaInsets.top)
-        model.notch = metrics
-        notchRect = NSRect(x: frame.minX + left.width, y: frame.maxY - metrics.height,
-                           width: notchWidth, height: metrics.height)
+    static func hasNotch(_ screen: NSScreen) -> Bool {
+        screen.safeAreaInsets.top > 0 && screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil
+    }
 
-        let size = IslandLayout.panelSize(notch: metrics)
-        let panelFrame = NSRect(x: notchRect.midX - size.width / 2, y: frame.maxY - size.height,
+    static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
+    }
+
+    func contains(point: NSPoint) -> Bool {
+        guard let screen = NSScreen.screens.first(where: { Self.displayID(of: $0) == displayID }) else { return false }
+        return screen.frame.contains(point)
+    }
+
+    /// Places the island: in the notch on the MacBook screen, as a pill in the middle of the
+    /// menu bar on any other screen.
+    func layout(on screen: NSScreen) {
+        let frame = screen.frame
+        let style: IslandStyle
+        let metrics: NotchMetrics
+        if Self.hasNotch(screen), let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            style = .notch
+            let notchWidth = frame.width - left.width - right.width
+            metrics = NotchMetrics(width: notchWidth, height: screen.safeAreaInsets.top)
+            anchorRect = NSRect(x: frame.minX + left.width, y: frame.maxY - metrics.height,
+                                width: notchWidth, height: metrics.height)
+        } else {
+            style = .floating
+            let menuBar = frame.maxY - screen.visibleFrame.maxY
+            metrics = .floatingPill(menuBarHeight: menuBar)
+            let gap = IslandLayout.topGap(style: .floating)
+            anchorRect = NSRect(x: frame.midX - metrics.width / 2, y: frame.maxY - gap - metrics.height,
+                                width: metrics.width, height: metrics.height)
+        }
+        screenTop = frame.maxY
+        if model.style != style { model.style = style }
+        if model.notch != metrics { model.notch = metrics }
+
+        let size = IslandLayout.panelSize(notch: metrics, style: style)
+        let panelFrame = NSRect(x: anchorRect.midX - size.width / 2, y: frame.maxY - size.height,
                                 width: size.width, height: size.height)
         if panel == nil {
             let p = IslandPanel(frame: panelFrame)
@@ -124,13 +156,12 @@ final class IslandController {
 
     /// The area that currently counts as "the island" for the pointer.
     private func hitRect() -> NSRect {
-        guard notchRect != .zero else { return .zero }
-        let size = IslandLayout.size(for: model.shape, notch: model.notch)
-        let w = max(size.width, notchRect.width)
-        let h = max(size.height, notchRect.height)
-        let top = notchRect.maxY
+        guard anchorRect != .zero else { return .zero }
+        let size = IslandLayout.size(for: model.shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth)
+        let w = max(size.width, anchorRect.width)
+        let h = max(size.height, anchorRect.height) + IslandLayout.topGap(style: model.style)
         // A little slack on the sides, and an extra point above so the very top edge counts.
-        return NSRect(x: notchRect.midX - w / 2 - 6, y: top - h - 4, width: w + 12, height: h + 5)
+        return NSRect(x: anchorRect.midX - w / 2 - 6, y: screenTop - h - 4, width: w + 12, height: h + 5)
     }
 
     // MARK: Pointer

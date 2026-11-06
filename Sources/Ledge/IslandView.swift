@@ -2,18 +2,28 @@ import AppKit
 import LedgeCore
 import SwiftUI
 
-/// The black island outline: a rounded-bottom rectangle with small outward
-/// "shoulders" at the top corners, like the real notch.
+/// The black island outline. On the notch: a rounded-bottom rectangle with small outward
+/// "shoulders" at the top corners, like the real notch. Floating (no shoulders): a pill or
+/// rounded card with its own top-corner radius.
 struct IslandOutline: Shape {
     var bottomRadius: CGFloat
     var shoulder: CGFloat
+    var topRadius: CGFloat = 0
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(bottomRadius, shoulder) }
-        set { bottomRadius = newValue.first; shoulder = newValue.second }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(bottomRadius, shoulder), topRadius) }
+        set { bottomRadius = newValue.first.first; shoulder = newValue.first.second; topRadius = newValue.second }
     }
 
     func path(in rect: CGRect) -> Path {
+        if shoulder < 0.5 {
+            let limit = min(rect.height / 2, rect.width / 2)
+            return UnevenRoundedRectangle(topLeadingRadius: min(topRadius, limit),
+                                          bottomLeadingRadius: min(bottomRadius, limit),
+                                          bottomTrailingRadius: min(bottomRadius, limit),
+                                          topTrailingRadius: min(topRadius, limit),
+                                          style: .continuous).path(in: rect)
+        }
         let s = shoulder
         let r = max(0, min(bottomRadius, rect.height / 2, (rect.width - 2 * s) / 2))
         var p = Path()
@@ -40,10 +50,12 @@ struct IslandRootView: View {
 
     var body: some View {
         let shape = model.shape
-        let size = IslandLayout.size(for: shape, notch: model.notch)
-        let shoulder = IslandLayout.shoulderRadius(for: shape)
-        let outline = IslandOutline(bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch),
-                                    shoulder: shoulder)
+        let style = model.style
+        let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth)
+        let shoulder = IslandLayout.shoulderRadius(for: shape, style: style)
+        let outline = IslandOutline(bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
+                                    shoulder: shoulder,
+                                    topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style))
 
         ZStack(alignment: .top) {
             // At rest the real notch is enough: draw nothing, so the island can never show up
@@ -65,6 +77,7 @@ struct IslandRootView: View {
             Divider()
             Button("Quit Ledge") { NSApp.terminate(nil) }
         }
+        .padding(.top, IslandLayout.topGap(style: style))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(shape == .hud ? Theme.pop : Theme.spring, value: shape)
         .environment(\.colorScheme, .dark)
@@ -79,17 +92,17 @@ struct IslandRootView: View {
         // Content only fades (no scaling), so the shape itself carries the motion.
         case .compact:
             CompactView(model: model)
-                .fixedFrame(for: .compact, notch: model.notch)
+                .fixedFrame(for: .compact, model: model)
                 .transition(Self.fade)
         case .hud:
             if let hud = model.hud {
-                HUDView(hud: hud, notch: model.notch)
-                    .fixedFrame(for: .hud, notch: model.notch)
+                HUDView(hud: hud, notch: model.notch, style: model.style)
+                    .fixedFrame(for: .hud, model: model)
                     .transition(Self.fade)
             }
         case .expanded:
             ExpandedView(model: model, calendar: calendar, notes: notes)
-                .fixedFrame(for: .expanded, notch: model.notch)
+                .fixedFrame(for: .expanded, model: model)
                 .transition(Self.fade)
         case .idle, .hover:
             Color.clear
@@ -99,8 +112,8 @@ struct IslandRootView: View {
 
 private extension View {
     /// Pins a view to the full size of its island shape, whatever size the animating shape is.
-    func fixedFrame(for shape: IslandShape, notch: NotchMetrics) -> some View {
-        let s = IslandLayout.size(for: shape, notch: notch)
+    func fixedFrame(for shape: IslandShape, model: IslandModel) -> some View {
+        let s = IslandLayout.size(for: shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth)
         return frame(width: s.width, height: s.height, alignment: .top)
     }
 }
@@ -111,14 +124,45 @@ struct CompactView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ArtworkView(image: model.artwork, size: 22, radius: 6)
-            Spacer(minLength: model.notch.width)
-            WaveformView(color: model.tint, playing: model.media.isPlaying)
-                .frame(width: 22, height: 14)
+        if model.style == .floating {
+            // No camera in the way, so the song name fits in the middle.
+            let h = model.notch.height
+            let m = IslandLayout.floatingCompactMetrics(height: h)
+            HStack(spacing: m.gap) {
+                ArtworkView(image: model.artwork, size: m.art, radius: m.art * 0.3)
+                songLine
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                WaveformView(color: model.tint, playing: model.media.isPlaying)
+                    .frame(width: m.bars, height: h * 0.42)
+            }
+            // Art and bars sit well inside the pill's round ends.
+            .padding(.leading, m.leading)
+            .padding(.trailing, m.trailing)
+            .frame(height: h)
+        } else {
+            HStack(spacing: 0) {
+                ArtworkView(image: model.artwork, size: 22, radius: 6)
+                Spacer(minLength: model.notch.width)
+                WaveformView(color: model.tint, playing: model.media.isPlaying)
+                    .frame(width: 22, height: 14)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: model.notch.height)
         }
-        .padding(.horizontal, 10)
-        .frame(height: model.notch.height)
+    }
+
+    /// Title in white, artist in gray.
+    private var songLine: Text {
+        let size = model.pillFontSize
+        let title = Text(model.media.title ?? "")
+            .font(.system(size: size, weight: .semibold))
+            .foregroundColor(.white)
+        guard let artist = model.media.artist, !artist.isEmpty else { return title }
+        return title + Text("  \(artist)")
+            .font(.system(size: size, weight: .regular))
+            .foregroundColor(Theme.secondaryText)
     }
 }
 
@@ -263,19 +307,32 @@ struct PressScaleStyle: ButtonStyle {
 
 // MARK: - HUDs
 
-/// Volume, brightness and battery: a row that drops down below the notch.
+/// Volume, brightness and battery: a row that drops down below the notch,
+/// or fills the floating pill on other screens.
 struct HUDView: View {
     var hud: HUD
     var notch: NotchMetrics
+    var style: IslandStyle = .notch
+
+    /// Text and icon sizes (smaller inside the menu-bar pill).
+    private var k: CGFloat { style == .floating ? 0.85 : 1 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Color.clear.frame(height: notch.height) // the camera area
+        if style == .floating {
             row
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 11)
                 .frame(maxWidth: .infinity)
-                .frame(height: IslandLayout.hudBody - 4)
+                .frame(height: notch.height)
                 .foregroundStyle(.white)
+        } else {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: notch.height) // the camera area
+                row
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: IslandLayout.hudBody - 4)
+                    .foregroundStyle(.white)
+            }
         }
     }
 
@@ -296,26 +353,26 @@ struct HUDView: View {
     }
 
     private func levelRow(symbol: String, level: Double) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 10 * k) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13 * k, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 20)
-            LevelBar(level: level).frame(height: 6)
+                .frame(width: 20 * k)
+            LevelBar(level: level).frame(height: 6 * k)
             Text("\(Int((level * 100).rounded()))")
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .font(.system(size: 12 * k, weight: .semibold).monospacedDigit())
                 .contentTransition(.numericText())
                 .frame(width: 26, alignment: .trailing)
         }
     }
 
     private func statusRow(symbol: String, title: String, percent: Int, battery: String, color: Color) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
-            Text(title).font(.system(size: 12.5, weight: .semibold))
+        HStack(spacing: 7 * k) {
+            Image(systemName: symbol).font(.system(size: 12 * k, weight: .semibold))
+            Text(title).font(.system(size: 12.5 * k, weight: .semibold))
             Spacer(minLength: 8)
-            Text("\(percent)%").font(.system(size: 12.5, weight: .semibold).monospacedDigit())
-            Image(systemName: battery).font(.system(size: 14))
+            Text("\(percent)%").font(.system(size: 12.5 * k, weight: .semibold).monospacedDigit())
+            Image(systemName: battery).font(.system(size: 14 * k))
         }
         .foregroundStyle(color)
     }

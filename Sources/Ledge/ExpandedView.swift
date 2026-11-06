@@ -51,7 +51,7 @@ struct TopBar: View {
                 .foregroundStyle(Theme.secondaryText)
                 .labelStyle(.titleAndIcon)
                 .contentTransition(.opacity)
-            Spacer(minLength: model.notch.width + 12)
+            Spacer(minLength: model.style == .notch ? model.notch.width + 12 : 12)
             HStack(spacing: 6) {
                 ForEach(model.pages, id: \.self) { p in
                     Circle()
@@ -65,7 +65,8 @@ struct TopBar: View {
             }
         }
         .padding(.horizontal, 20)
-        .frame(height: model.notch.height)
+        .frame(height: model.style == .notch ? model.notch.height : IslandLayout.floatingTopBar)
+        .padding(.top, model.style == .notch ? 0 : 2)
     }
 }
 

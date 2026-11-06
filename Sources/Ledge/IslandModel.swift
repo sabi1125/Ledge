@@ -14,6 +14,8 @@ enum HUD: Equatable {
 /// Everything the island view needs to draw itself.
 @MainActor
 final class IslandModel: ObservableObject {
+    /// Notch island on the MacBook screen, floating pill on other screens.
+    @Published var style: IslandStyle = .notch { didSet { recompute() } }
     @Published var notch: NotchMetrics = .fallback
     @Published private(set) var shape: IslandShape = .idle
 
@@ -114,27 +116,36 @@ final class IslandModel: ObservableObject {
         recompute()
     }
 
-    func setArtwork(_ data: Data?) {
-        guard let data, let image = NSImage(data: data) else {
-            artwork = nil
-            tint = Theme.defaultTint
-            return
-        }
+    func setArtwork(image: NSImage?, tint newTint: Color) {
         artwork = image
-        tint = ArtworkColor.tint(for: image) ?? Theme.defaultTint
+        tint = newTint
     }
 
     /// Used only by the snapshot tool to draw a specific state.
     func forceShape(_ s: IslandShape, hud: HUD? = nil, page: IslandPage? = nil) {
         self.hud = hud
         if let page { self.page = page }
-        showsFill = s != .idle
+        showsFill = s != .idle || style == .floating
         shape = s
     }
 
     // MARK: State
 
     var hasMedia: Bool { Pref.bool(Pref.showMusic) && media.hasContent }
+
+    /// Font size of the song name in the floating music pill.
+    var pillFontSize: CGFloat { notch.height >= 24 ? 12 : 11 }
+
+    /// Width of the floating music pill, sized to fit the song name (nil on the notch).
+    var compactWidth: CGFloat? {
+        guard style == .floating else { return nil }
+        let title = media.title ?? "", artist = media.artist ?? ""
+        let bold = NSFont.systemFont(ofSize: pillFontSize, weight: .semibold)
+        let plain = NSFont.systemFont(ofSize: pillFontSize, weight: .regular)
+        var width = (title as NSString).size(withAttributes: [.font: bold]).width
+        if !artist.isEmpty { width += ("  " + artist as NSString).size(withAttributes: [.font: plain]).width }
+        return IslandLayout.floatingCompactWidth(textWidth: width.rounded(.up) + 2, height: notch.height)
+    }
     var pages: [IslandPage] { IslandPage.available(hasMedia: hasMedia) }
 
     private func expand(force: Bool = false) {
@@ -171,7 +182,8 @@ final class IslandModel: ObservableObject {
         }
         // The black shape is solid whenever the island is out (and while it animates back in);
         // it turns invisible only once it has fully settled back into the notch.
-        if next != .idle {
+        // The floating pill is always visible.
+        if next != .idle || style == .floating {
             fillTimer?.invalidate()
             if !showsFill { showsFill = true }
         } else if showsFill {

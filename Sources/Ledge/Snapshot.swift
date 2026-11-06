@@ -11,6 +11,14 @@ enum Snapshot {
         Pref.registerDefaults()
         let notch = NotchMetrics(width: 185, height: 32)
         let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
+            ("f1-pill-idle", .idle, nil, false, .music),
+            ("f2-pill-music", .compact, nil, true, .music),
+            ("f2b-pill-music-menubar", .compact, nil, true, .music),
+            ("f2c-pill-music-short", .compact, nil, true, .music),
+            ("f3-pill-volume", .hud, .volume(level: 0.62, muted: false), false, .music),
+            ("f4-pill-charging", .hud, .charging(percent: 82), false, .music),
+            ("f5-pill-open", .expanded, nil, true, .music),
+            ("f6-pill-calendar", .expanded, nil, true, .calendar),
             ("1-idle", .idle, nil, false, .music),
             ("2-compact", .compact, nil, true, .music),
             ("3-expanded", .expanded, nil, true, .music),
@@ -45,24 +53,27 @@ enum Snapshot {
                 ? "Buy oat milk\nCall the landlord about the heater\nIdea: notch timer for pomodoros"
                 : "")
             let model = IslandModel()
-            model.notch = notch
+            let floating = name.hasPrefix("f")
+            model.style = floating ? .floating : .notch
+            model.notch = floating ? .floatingPill(menuBarHeight: name.contains("menubar") ? 25 : (name.contains("music") ? 0 : 25)) : notch
             var media = NowPlayingState()
-            media.title = "Golden Hour Drive"
-            media.artist = "Sunline"
+            media.title = name.hasPrefix("f2c") ? "The Fall" : (name.hasPrefix("f2") ? "Tom's Diner" : "Golden Hour Drive")
+            media.artist = name.hasPrefix("f2c") ? "Gregory Alan Isakov" : (name.hasPrefix("f2") ? "AnnenMayKantereit, Giant Rooks" : "Sunline")
             media.duration = 228
             media.elapsed = 96
             media.isPlaying = playing
             media.timestamp = Date()
             model.media = media
-            model.setArtwork(sampleArtwork().tiffRepresentation)
+            let art = sampleArtwork()
+            model.setArtwork(image: art, tint: ArtworkColor.tint(for: art) ?? Theme.defaultTint)
             model.forceShape(shape, hud: hud, page: page)
 
-            let panel = IslandLayout.panelSize(notch: notch)
+            let panel = IslandLayout.panelSize(notch: model.notch, style: model.style)
             let view = ZStack(alignment: .top) {
                 LinearGradient(colors: [Color(red: 0.14, green: 0.11, blue: 0.31), Color(red: 0.42, green: 0.29, blue: 0.66)],
                                startPoint: .top, endPoint: .bottom)
                 // Menu bar strip, for context.
-                Color.white.opacity(0.06).frame(height: notch.height)
+                Color.white.opacity(0.06).frame(height: floating ? 25 : notch.height)
                 IslandRootView(model: model, calendar: calendarStore, notes: notesStore, openSettings: {})
             }
             .frame(width: panel.width, height: panel.height)
