@@ -49,6 +49,7 @@ final class IslandController {
     let settings: SettingsState
     let updater: Updater
     private var panel: IslandPanel?
+    private var revealPanel: IslandPanel?
     /// The resting island (the notch, or the idle pill), in global screen coordinates.
     private var anchorRect: NSRect = .zero
     private var screenTop: CGFloat = 0
@@ -120,6 +121,8 @@ final class IslandController {
         panel?.orderOut(nil)
         panel?.close()
         panel = nil
+        revealPanel?.close()
+        revealPanel = nil
     }
 
     // MARK: Screen
@@ -138,7 +141,10 @@ final class IslandController {
 
     func contains(point: NSPoint) -> Bool {
         guard let screen = NSScreen.screens.first(where: { Self.displayID(of: $0) == displayID }) else { return false }
-        return screen.frame.contains(point)
+        // Edges included: a pointer flung to the top is pinned exactly on the top edge line,
+        // which `NSRect.contains` would leave out.
+        let f = screen.frame
+        return point.x >= f.minX && point.x <= f.maxX && point.y >= f.minY && point.y <= f.maxY
     }
 
     /// Places the island: in the notch on the MacBook screen, as a pill in the middle of the
@@ -168,29 +174,55 @@ final class IslandController {
         let size = IslandLayout.panelSize(notch: metrics, style: style)
         let panelFrame = NSRect(x: anchorRect.midX - size.width / 2, y: frame.maxY - size.height,
                                 width: size.width, height: size.height)
-        if panel == nil {
-            let p = IslandPanel(frame: panelFrame)
-            p.allowsKey = { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let m = self?.model else { return false }
-                    return m.isShowingSettings || (m.isExpanded && m.page == .notes)
-                }
-            }
-            // Clicking anywhere else ends typing, and the island closes.
-            NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.model.isTyping = false }
-            }
-            let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake,
-                                      settings: settings, updater: updater, openSettings: openSettings)
-            let host = FirstMouseHostingView(rootView: root)
-            host.frame = NSRect(origin: .zero, size: size)
-            host.autoresizingMask = [.width, .height]
-            p.contentView = host
-            panel = p
+        if panel == nil { panel = makePanel(frame: panelFrame, size: size) }
+        // Floating pills hide during Mission Control (the notch island can stay).
+        if style == .floating {
+            panel?.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         }
         panel?.setFrame(panelFrame, display: true)
         if !isHidden { panel?.orderFrontRegardless() }
+        // Floating pills get an invisible twin that lives only on full-screen desktops; showing
+        // the pill there is then just a fade (macOS needs no time to set anything up).
+        if style == .floating {
+            if revealPanel == nil {
+                let r = makePanel(frame: panelFrame, size: size)
+                r.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
+                r.alphaValue = 0
+                r.ignoresMouseEvents = true
+                r.contentView?.isHidden = true // draws nothing until it's revealed
+                revealPanel = r
+            }
+            revealPanel?.setFrame(panelFrame, display: true)
+            revealPanel?.orderFrontRegardless()
+        } else {
+            revealPanel?.close()
+            revealPanel = nil
+        }
     }
+
+    private func makePanel(frame: NSRect, size: CGSize) -> IslandPanel {
+        let p = IslandPanel(frame: frame)
+        p.allowsKey = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let m = self?.model else { return false }
+                return m.isShowingSettings || (m.isExpanded && m.page == .notes)
+            }
+        }
+        // Clicking anywhere else ends typing, and the island closes.
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.isTyping = false }
+        }
+        let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake,
+                                  settings: settings, updater: updater, openSettings: openSettings)
+        let host = FirstMouseHostingView(rootView: root)
+        host.frame = NSRect(origin: .zero, size: size)
+        host.autoresizingMask = [.width, .height]
+        p.contentView = host
+        return p
+    }
+
+    /// The window the pointer is working with: the full-screen twin while it's revealed.
+    private var activePanel: IslandPanel? { revealedSpace != nil ? revealPanel : panel }
 
     /// Hidden while something is full screen on this screen. Only used when pinning to
     /// desktops isn't available; with pinning, macOS itself keeps the pill off full-screen desktops.
@@ -215,15 +247,30 @@ final class IslandController {
     /// leaves it out of the full-screen ones, including while you swipe into them.
     func keepOff(fullScreen spaces: Spaces.DisplaySpaces) {
         guard let panel else { return }
+        fullScreenSpace = spaces.currentIsFullScreen ? spaces.current : nil
+        // Left the full-screen desktop while the pill was revealed there: tidy up.
+        if let revealed = revealedSpace, revealed != fullScreenSpace { endReveal(animated: false) }
         let current = Spaces.spaces(ofWindow: panel.windowNumber)
         let onFullScreen = current.filter { spaces.fullScreen.contains($0) }
         let missingNormal = spaces.normal.filter { !current.contains($0) }
-        guard !onFullScreen.isEmpty || !missingNormal.isEmpty else { return }
-        Spaces.pin(window: panel.windowNumber, to: missingNormal, removeFrom: onFullScreen)
-        if !loggedPin || !onFullScreen.isEmpty {
-            loggedPin = true
-            LedgeLog.shared.write("spaces: pill on display \(displayID) taken off full-screen desktops \(onFullScreen); now on \(Spaces.spaces(ofWindow: panel.windowNumber))")
+        if !onFullScreen.isEmpty || !missingNormal.isEmpty {
+            Spaces.pin(window: panel.windowNumber, to: missingNormal, removeFrom: onFullScreen)
+            if !loggedPin || !onFullScreen.isEmpty {
+                loggedPin = true
+                LedgeLog.shared.write("spaces: pill on display \(displayID) taken off full-screen desktops \(onFullScreen); now on \(Spaces.spaces(ofWindow: panel.windowNumber))")
+            }
         }
+        if let twin = revealPanel {
+            let twinOn = Spaces.spaces(ofWindow: twin.windowNumber)
+            let offNormal = twinOn.filter { spaces.normal.contains($0) }
+            let missingFull = spaces.fullScreen.filter { !twinOn.contains($0) }
+            if !offNormal.isEmpty || !missingFull.isEmpty {
+                Spaces.pin(window: twin.windowNumber, to: missingFull, removeFrom: offNormal)
+            }
+        }
+        // This runs several times a second on full-screen desktops, so a pointer resting at the
+        // top edge is noticed even when it stops moving (macOS sends no more movement then).
+        checkFullScreenReveal()
     }
 
     /// The area that currently counts as "the island" for the pointer.
@@ -273,8 +320,96 @@ final class IslandController {
         }) { monitors.append(c) }
     }
 
+    // MARK: Full-screen reveal
+
+    /// The full-screen desktop this screen is showing right now (nil on a normal desktop).
+    private var fullScreenSpace: UInt64?
+    /// While on a full-screen desktop, the pill shows when you move to the top (with the menu bar).
+    private var revealedSpace: UInt64?
+    private var hideReveal: DispatchWorkItem?
+    /// When the pointer arrived at the top edge; the pill waits a moment, like macOS's menu bar.
+    private var atTopSince: Date?
+    private let revealDelay: TimeInterval = 0.35
+
+    private func checkFullScreenReveal() {
+        guard model.style == .floating, let fs = fullScreenSpace else { return }
+        let p = NSEvent.mouseLocation
+        let onThisScreen = contains(point: p)
+        let fromTop = screenTop - p.y
+        if revealedSpace == nil {
+            // The very top edge is what makes macOS slide the menu bar down. It waits a moment
+            // before doing so, so the pill waits the same amount and arrives with it.
+            guard onThisScreen && fromTop <= 3 else { atTopSince = nil; return }
+            let since = atTopSince ?? Date()
+            atTopSince = since
+            if Date().timeIntervalSince(since) >= revealDelay {
+                atTopSince = nil
+                beginReveal(on: fs)
+            } else {
+                // Look again right when the wait is over (the pointer may not move again).
+                DispatchQueue.main.asyncAfter(deadline: .now() + revealDelay - Date().timeIntervalSince(since) + 0.01) { [weak self] in
+                    self?.checkFullScreenReveal()
+                }
+            }
+        } else {
+            // Stays while you're up in the menu bar, on the pill, or using the open island.
+            let keep = onThisScreen && (fromTop <= 26 || hitRect().contains(p) || model.isExpanded || model.isShowingSettings)
+            if keep {
+                hideReveal?.cancel()
+                hideReveal = nil
+            } else if hideReveal == nil {
+                let work = DispatchWorkItem { [weak self] in self?.endReveal(animated: true) }
+                hideReveal = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+            }
+        }
+    }
+
+    /// Debug only: reveals the pill now if this screen is showing a full-screen desktop.
+    func debugReveal() {
+        if let fs = fullScreenSpace, revealedSpace == nil { beginReveal(on: fs) }
+    }
+
+    private func beginReveal(on space: UInt64) {
+        guard let twin = revealPanel else { return }
+        revealedSpace = space
+        LedgeLog.shared.write("fullscreen: pointer at the top of display \(displayID), showing the pill")
+        twin.contentView?.isHidden = false
+        twin.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22 // about as long as the menu bar takes to slide down
+            twin.animator().alphaValue = 1
+        }
+    }
+
+    private func endReveal(animated: Bool) {
+        guard revealedSpace != nil, let twin = revealPanel else { return }
+        hideReveal?.cancel()
+        hideReveal = nil
+        if model.isExpanded { model.close() }
+        if model.isShowingSettings { model.closeSettings() }
+        LedgeLog.shared.write("fullscreen: hiding the pill again on display \(displayID)")
+        revealedSpace = nil
+        twin.ignoresMouseEvents = true
+        if animated {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.16
+                twin.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    // Stop drawing once it's faded out (unless it was revealed again meanwhile).
+                    if self?.revealedSpace == nil { twin.contentView?.isHidden = true }
+                }
+            })
+        } else {
+            twin.alphaValue = 0
+            twin.contentView?.isHidden = true
+        }
+    }
+
     private func updatePointer() {
-        guard let panel, panel.isVisible, !isHidden else { return }
+        checkFullScreenReveal()
+        guard let panel = activePanel, panel.isVisible, !isHidden else { return }
         var inside = hitRect().contains(NSEvent.mouseLocation)
         // While a mouse button is held (dragging a window, selecting text, resizing), passing
         // over the notch shouldn't open the island. A drag that started on the island

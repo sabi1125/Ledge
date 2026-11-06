@@ -18,7 +18,7 @@ A personal, Alcove-style notch app for your MacBook Pro. It's for your own use o
 
 ## External displays
 
-Screens without a notch get a floating pill at the top center, like the original iPhone Dynamic Island. It has the same features and stays visible on normal desktops. It's kept off full-screen desktops (apps and videos) at the macOS level, so it never flickers when you swipe. Turn it off with "Show Ledge on other displays" in settings.
+Screens without a notch get a floating pill at the top center, like the original iPhone Dynamic Island. It has the same features and stays visible on normal desktops. It's kept off full-screen desktops (apps and videos) at the macOS level, so it never flickers when you swipe. On a full-screen desktop, rest the pointer at the top edge and the pill fades in along with the menu bar, then fades out when you move away. It also hides during Mission Control. Turn it off with "Show Ledge on other displays" in settings.
 
 ## Clean menu bar
 

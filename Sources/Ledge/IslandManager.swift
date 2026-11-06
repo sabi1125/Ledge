@@ -125,6 +125,11 @@ final class IslandManager {
         target?.model.openSettings()
     }
 
+    /// Debug only: reveals every floating pill that's on a full-screen desktop.
+    func debugReveal() {
+        controllers.values.filter { $0.model.style == .floating }.forEach { $0.debugReveal() }
+    }
+
     /// Debug only: plays a style's open and close on the notch while recording it.
     func debugRecord(style: String, to dir: String) {
         guard let c = controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return }

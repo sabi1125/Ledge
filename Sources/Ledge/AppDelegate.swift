@@ -103,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.requestAccessibility = { [weak self] in self?.hider.requestPermission() }
         settingsState.revealIcons = { [weak self] in self?.hider.reveal() }
         settingsState.previewAnimation = { [weak self] in self?.islands.previewAnimation() }
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.reveal"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.islands.debugReveal() }
+        }
         // Debug only: `ledge-record <style> <folder>` records an animation for checking.
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.record"), object: nil, queue: .main) { [weak self] note in
             guard let args = (note.object as? String)?.split(separator: "|").map(String.init), args.count == 2 else { return }
