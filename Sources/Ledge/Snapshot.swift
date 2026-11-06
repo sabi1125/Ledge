@@ -34,7 +34,12 @@ enum Snapshot {
             ("19-awake-menu", .expanded, nil, true, .music),
             ("20-awake-pop-on", .hud, .awakeOn(minutes: 60), false, .music),
             ("21-awake-pop-off", .hud, .awakeOff, false, .music),
-            ("17-settings", .settings, nil, false, .music),
+            ("17-settings-pages", .settings, nil, false, .music),
+            ("17-settings-indicators", .settings, nil, false, .music),
+            ("17-settings-animation", .settings, nil, false, .music),
+            ("17-settings-pomodoro", .settings, nil, false, .music),
+            ("17-settings-awake", .settings, nil, false, .music),
+            ("17-settings-general", .settings, nil, false, .music),
             ("f9-pill-settings", .settings, nil, false, .music),
             ("12-timer-page-idle", .expanded, nil, false, .timer),
             ("22-pomo-focus", .expanded, nil, false, .timer),
@@ -69,6 +74,7 @@ enum Snapshot {
             let awakeStore = AwakeStore()
             if name.contains("awake-on") { awakeStore.start(minutes: 60) }
             ExpandedView.snapshotMenu = name.contains("awake-menu")
+            SettingsPanel.startSection = SettingsPanel.Section.allCases.first { name.hasSuffix("settings-\($0.rawValue)") } ?? .pages
             let timerStore = TimerStore()
             if name.contains("pomo") {
                 timerStore.mode = .pomodoro

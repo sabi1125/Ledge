@@ -353,7 +353,8 @@ final class IslandController {
             }
         } else {
             // Stays while you're up in the menu bar, on the pill, or using the open island.
-            let keep = onThisScreen && (fromTop <= 26 || hitRect().contains(p) || model.isExpanded || model.isShowingSettings)
+            let showingAlert = alertUntil.map { Date() < $0 } ?? false
+            let keep = showingAlert || onThisScreen && (fromTop <= 26 || hitRect().contains(p) || model.isExpanded || model.isShowingSettings)
             if keep {
                 hideReveal?.cancel()
                 hideReveal = nil
@@ -362,6 +363,21 @@ final class IslandController {
                 hideReveal = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
             }
+        }
+    }
+
+    /// Until when an alert (timer done, pomodoro phase change) keeps the pill shown on a full-screen desktop.
+    private var alertUntil: Date?
+
+    /// Shows an alert pop. On a full-screen desktop, where the pill is normally hidden,
+    /// it slides in just for the pop and goes away again afterwards.
+    func alert(_ hud: HUD) {
+        model.show(hud)
+        guard model.style == .floating, let fs = fullScreenSpace else { return }
+        alertUntil = Date().addingTimeInterval(IslandModel.duration(of: hud))
+        if revealedSpace == nil {
+            LedgeLog.shared.write("fullscreen: showing an alert on display \(displayID)")
+            beginReveal(on: fs)
         }
     }
 

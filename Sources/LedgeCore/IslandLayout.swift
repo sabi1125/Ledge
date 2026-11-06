@@ -51,9 +51,9 @@ public enum IslandLayout {
     /// Height of the open island's content area (below the notch or the top bar).
     public static let expandedBody: CGFloat = 140
     public static let expandedMinWidth: CGFloat = 530
-    /// The settings panel: wider than the open island, with two columns.
+    /// The settings panel: wider than the open island, a sidebar and one section.
     public static let settingsWidth: CGFloat = 640
-    public static let settingsBody: CGFloat = 532
+    public static let settingsBody: CGFloat = 272
     /// Height of the page bar at the top of an open floating island.
     public static let floatingTopBar: CGFloat = 28
     /// Gap between the top of the screen and a floating island.

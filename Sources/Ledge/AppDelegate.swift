@@ -36,12 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         awake.onStart = { [weak self] minutes in self?.showIndicator(.awakeOn(minutes: minutes)) }
         awake.onEnd = { [weak self] in self?.showIndicator(.awakeOff) }
         timer.onPhaseEnd = { [weak self] ended, next, minutes in
-            self?.showIndicator(.pomodoro(ended: ended, next: next, minutes: minutes))
+            self?.islands.alertEverywhere(.pomodoro(ended: ended, next: next, minutes: minutes))
             Haptics.alert()
         }
         timer.onFinish = { [weak self] in
             guard let self else { return }
-            self.showIndicator(.timerDone(duration: self.timer.countdown.duration))
+            self.islands.alertEverywhere(.timerDone(duration: self.timer.countdown.duration))
             Haptics.alert()
         }
 
@@ -105,6 +105,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.previewAnimation = { [weak self] in self?.islands.previewAnimation() }
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.reveal"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.islands.debugReveal() }
+        }
+        // Debug only: shows a pomodoro alert everywhere, as if a focus session just ended.
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.alert"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.islands.alertEverywhere(.pomodoro(ended: .focus, next: .shortBreak, minutes: 5)) }
         }
         // Debug only: `ledge-record <style> <folder>` records an animation for checking.
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.record"), object: nil, queue: .main) { [weak self] note in

@@ -122,14 +122,7 @@ final class IslandModel: ObservableObject {
     func show(_ newHUD: HUD) {
         hud = newHUD
         hudTimer?.invalidate()
-        let seconds: TimeInterval
-        switch newHUD {
-        case .volume, .brightness: seconds = 1.5
-        case .charging, .lowBattery: seconds = 2.6
-        case .timerDone: seconds = 6
-        case .awakeOn, .awakeOff: seconds = 1.8
-        case .pomodoro: seconds = 4
-        }
+        let seconds = Self.duration(of: newHUD)
         hudTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.hud = nil
@@ -137,6 +130,17 @@ final class IslandModel: ObservableObject {
             }
         }
         recompute()
+    }
+
+    /// How long each pop stays.
+    static func duration(of hud: HUD) -> TimeInterval {
+        switch hud {
+        case .volume, .brightness: return 1.5
+        case .charging, .lowBattery: return 2.6
+        case .timerDone: return 6
+        case .awakeOn, .awakeOff: return 1.8
+        case .pomodoro: return 4
+        }
     }
 
     func setArtwork(image: NSImage?, tint newTint: Color) {

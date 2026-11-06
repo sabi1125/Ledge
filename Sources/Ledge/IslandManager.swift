@@ -150,6 +150,11 @@ final class IslandManager {
     }
 
     /// The island on the screen you're using (where the pointer is), for indicators.
+    /// Alerts you shouldn't miss go to every screen (and show even over full-screen apps).
+    func alertEverywhere(_ hud: HUD) {
+        for c in controllers.values { c.alert(hud) }
+    }
+
     func islandUnderPointer() -> IslandModel? {
         let p = NSEvent.mouseLocation
         if let c = controllers.values.first(where: { $0.contains(point: p) }) { return c.model }

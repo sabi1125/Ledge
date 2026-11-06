@@ -15,8 +15,33 @@ final class SettingsState: ObservableObject {
 }
 
 /// Ledge's settings, shown inside the island itself (opened from Spotlight, the Applications
-/// folder, or a right-click on the island). Two columns, in the island's own black style.
+/// folder, or a right-click on the island). A sidebar of sections on the left, one section on the right.
 struct SettingsPanel: View {
+    enum Section: String, CaseIterable, Identifiable {
+        case pages, indicators, animation, pomodoro, awake, general
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .pages: return "Pages"
+            case .indicators: return "Indicators"
+            case .animation: return "Animation"
+            case .pomodoro: return "Pomodoro"
+            case .awake: return "Stay awake"
+            case .general: return "General"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .pages: return "rectangle.stack"
+            case .indicators: return "speaker.wave.2"
+            case .animation: return "sparkles"
+            case .pomodoro: return "target"
+            case .awake: return "cup.and.saucer"
+            case .general: return "slider.horizontal.3"
+            }
+        }
+    }
+
     @ObservedObject var model: IslandModel
     @ObservedObject var state: SettingsState
     @ObservedObject var updater: Updater
@@ -34,7 +59,6 @@ struct SettingsPanel: View {
     @AppStorage(Pref.openOnHover) private var openOnHover = true
     @AppStorage(Pref.haptics) private var haptics = true
     @AppStorage(Pref.showOnOtherDisplays) private var showOnOtherDisplays = true
-    @AppStorage(Pref.hideMenuBarIcons) private var hideIcons = true
     // Animation
     @AppStorage(IslandAnimation.key) private var animation = IslandAnimation.calm.rawValue
     // Stay awake
@@ -48,118 +72,192 @@ struct SettingsPanel: View {
     @AppStorage(Pref.pomoSessions) private var pomoSessions = 4
     @AppStorage(Pref.pomoAutoStart) private var pomoAutoStart = true
 
+    @State private var section: Section = SettingsPanel.startSection
+
     /// The snapshot tool can't draw scroll views, so it turns this off.
     static var scrolls = true
+    /// Which section opens first (the snapshot tool draws each one).
+    static var startSection: Section = .pages
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if Self.scrolls {
-                ScrollView(.vertical) { columns }.scrollIndicators(.never)
-            } else {
-                columns
+            HStack(alignment: .top, spacing: 18) {
+                sidebar
+                Group {
+                    if Self.scrolls {
+                        ScrollView(.vertical) { detail }.scrollIndicators(.never)
+                    } else {
+                        detail
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .padding(.leading, 14)
+            .padding(.trailing, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
         }
         .onAppear { state.launchAtLogin = LoginItem.isEnabled }
     }
 
-    private var columns: some View {
-                HStack(alignment: .top, spacing: 26) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        group("Pages") {
-                            SwitchRow(title: "Music", symbol: "music.note", isOn: $showMusic)
-                            SwitchRow(title: "Calendar", symbol: "calendar", isOn: $pageCalendar)
-                            SwitchRow(title: "Timer", symbol: "timer", isOn: $pageTimer)
-                            SwitchRow(title: "Notes", symbol: "note.text", isOn: $pageNotes)
-                        }
-                        group("Indicators") {
-                            SwitchRow(title: "Volume", symbol: "speaker.wave.2.fill", isOn: $showVolume)
-                            SwitchRow(title: "Brightness", symbol: "sun.max.fill", isOn: $showBrightness)
-                            SwitchRow(title: "Charging and low battery", symbol: "battery.75percent", isOn: $showBattery)
-                        }
-                        group("Behavior") {
-                            SwitchRow(title: "Open on hover", symbol: "cursorarrow.motionlines", isOn: $openOnHover)
-                            SwitchRow(title: "Trackpad tick", symbol: "hand.tap", isOn: $haptics)
-                            SwitchRow(title: "Show on other displays", symbol: "display.2", isOn: $showOnOtherDisplays)
-                        }
-                        group("Pomodoro") {
-                            ChoiceRow2(title: "Focus", symbol: "target", value: $pomoFocus,
-                                       options: [15, 20, 25, 30, 45, 50, 60]) { "\($0) min" }
-                            ChoiceRow2(title: "Short break", symbol: "leaf", value: $pomoShort,
-                                       options: [3, 5, 10, 15]) { "\($0) min" }
-                            ChoiceRow2(title: "Long break", symbol: "leaf.fill", value: $pomoLong,
-                                       options: [10, 15, 20, 25, 30]) { "\($0) min" }
-                            ChoiceRow2(title: "Sessions before a long break", symbol: "circle.grid.2x2", value: $pomoSessions,
-                                       options: [2, 3, 4, 5, 6]) { "\($0)" }
-                            SwitchRow(title: "Start the next phase by itself", symbol: "arrow.forward.circle", isOn: $pomoAutoStart)
-                        }
+    // MARK: Sidebar
 
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Section.allCases) { s in
+                Button { withAnimation(.smooth(duration: 0.2)) { section = s } } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: s.symbol)
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16)
+                        Text(s.title).font(.system(size: 12.5, weight: section == s ? .semibold : .regular))
+                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        group("Animation") {
-                            ForEach(IslandAnimation.allCases) { a in
-                                ChoiceRow(title: a.title, detail: a.detail, selected: animation == a.rawValue) {
-                                    animation = a.rawValue
-                                    model.replaySettings() // show it straight away
-                                }
-                            }
-                        }
-                        group("Updates") { updatesRow }
-                        group("Stay awake") {
-                            HStack(spacing: 9) {
-                                Image(systemName: "cup.and.saucer")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Theme.secondaryText).frame(width: 16)
-                                Text("Default length").font(.system(size: 12.5)).foregroundStyle(.white)
-                                Spacer(minLength: 8)
-                                Menu {
-                                    ForEach(AwakeStore.lengths, id: \.self) { m in
-                                        Button(m == 0 ? "Until I turn it off" : describeAwakeLength(minutes: m)) { awakeMinutes = m }
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text(awakeMinutes == 0 ? "Until off" : describeAwakeLength(minutes: awakeMinutes))
-                                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
-                                    }
-                                    .font(.system(size: 11.5, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 10).frame(height: 21)
-                                    .background(Capsule().fill(Color(white: 0.2)))
-                                }
-                                .menuStyle(.button)
-                                .buttonStyle(.plain)
-                                .menuIndicator(.hidden)
-                                .fixedSize()
-                            }
-                            .frame(height: 24)
-                            SwitchRow(title: "Keep the screen on too", symbol: "display", isOn: $awakeScreenOn)
-                            SwitchRow(title: "Stay awake while charging", symbol: "bolt.fill", isOn: $awakeCharging)
-                        }
-                        group("General") {
-                            SwitchRow(title: "Open at login", symbol: "power", isOn: $state.launchAtLogin)
-                                .onChange(of: state.launchAtLogin) { _, value in
-                                    LoginItem.set(value)
-                                    state.launchAtLogin = LoginItem.isEnabled
-                                }
-                            SwitchRow(title: "Squeeze menu bar icons", symbol: "menubar.rectangle", isOn: $hideIcons)
-                                .onChange(of: hideIcons) { _, value in state.onHideIconsChanged?(value) }
-                            HStack(spacing: 8) {
-                                Button("Quit Ledge") { NSApp.terminate(nil) }
-                                    .buttonStyle(PillButtonStyle(prominent: false))
-                                Spacer()
-                                Button("Done") { model.closeSettings() }
-                                    .buttonStyle(PillButtonStyle(prominent: true))
-                            }
-                            .padding(.top, 2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(section == s ? Color.white : Theme.secondaryText)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(section == s ? Color(white: 0.14) : .clear))
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 6)
-                .padding(.bottom, 18)
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: 150)
+    }
+
+    // MARK: Sections
+
+    @ViewBuilder private var detail: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(section.title.uppercased())
+                .font(.system(size: 9.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(Color(white: 0.45))
+                .padding(.leading, 4)
+            switch section {
+            case .pages:
+                Card {
+                    SwitchRow(title: "Music", symbol: "music.note", isOn: $showMusic)
+                    CardDivider()
+                    SwitchRow(title: "Calendar", symbol: "calendar", isOn: $pageCalendar)
+                    CardDivider()
+                    SwitchRow(title: "Timer", symbol: "timer", isOn: $pageTimer)
+                    CardDivider()
+                    SwitchRow(title: "Notes", symbol: "note.text", isOn: $pageNotes)
+                }
+                hint("Swipe with two fingers on the open island to switch pages.")
+            case .indicators:
+                Card {
+                    SwitchRow(title: "Volume", symbol: "speaker.wave.2.fill", isOn: $showVolume)
+                    CardDivider()
+                    SwitchRow(title: "Brightness", symbol: "sun.max.fill", isOn: $showBrightness)
+                    CardDivider()
+                    SwitchRow(title: "Charging and low battery", symbol: "battery.75percent", isOn: $showBattery)
+                }
+                hint("Shown in the island instead of the macOS pop-ups.")
+            case .animation:
+                animationGrid
+                hint("Tap one to see it right away.")
+            case .pomodoro:
+                Card {
+                    ChoiceRow2(title: "Focus", symbol: "target", value: $pomoFocus,
+                               options: [15, 20, 25, 30, 45, 50, 60]) { "\($0) min" }
+                    CardDivider()
+                    ChoiceRow2(title: "Short break", symbol: "leaf", value: $pomoShort,
+                               options: [3, 5, 10, 15]) { "\($0) min" }
+                    CardDivider()
+                    ChoiceRow2(title: "Long break", symbol: "leaf.fill", value: $pomoLong,
+                               options: [10, 15, 20, 25, 30]) { "\($0) min" }
+                    CardDivider()
+                    ChoiceRow2(title: "Sessions before a long break", symbol: "circle.grid.2x2", value: $pomoSessions,
+                               options: [2, 3, 4, 5, 6]) { "\($0)" }
+                }
+                Card {
+                    SwitchRow(title: "Start the next phase by itself", symbol: "arrow.forward.circle", isOn: $pomoAutoStart)
+                }
+            case .awake:
+                Card {
+                    ChoiceRow2(title: "Default length", symbol: "cup.and.saucer", value: $awakeMinutes,
+                               options: AwakeStore.lengths,
+                               menuLabel: { $0 == 0 ? "Until I turn it off" : describeAwakeLength(minutes: $0) }) {
+                        $0 == 0 ? "Until off" : describeAwakeLength(minutes: $0)
+                    }
+                    CardDivider()
+                    SwitchRow(title: "Keep the screen on too", symbol: "display", isOn: $awakeScreenOn)
+                    CardDivider()
+                    SwitchRow(title: "Stay awake while charging", symbol: "bolt.fill", isOn: $awakeCharging)
+                }
+                hint("Click the cup in the open island to start or stop.")
+            case .general:
+                Card {
+                    SwitchRow(title: "Open at login", symbol: "power", isOn: $state.launchAtLogin)
+                        .onChange(of: state.launchAtLogin) { _, value in
+                            LoginItem.set(value)
+                            state.launchAtLogin = LoginItem.isEnabled
+                        }
+                    CardDivider()
+                    SwitchRow(title: "Open on hover", symbol: "cursorarrow.motionlines", isOn: $openOnHover)
+                    CardDivider()
+                    SwitchRow(title: "Trackpad tick", symbol: "hand.tap", isOn: $haptics)
+                    CardDivider()
+                    SwitchRow(title: "Show on other displays", symbol: "display.2", isOn: $showOnOtherDisplays)
+                }
+                Card { updatesRow.padding(.vertical, 8) }
+                Button("Quit Ledge") { NSApp.terminate(nil) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(.leading, 4)
+            }
+        }
+        .id(section)
+        .transition(.opacity)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10.5))
+            .foregroundStyle(Color(white: 0.45))
+            .padding(.leading, 4)
+    }
+
+    private var animationGrid: some View {
+        let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(IslandAnimation.allCases) { a in
+                let selected = animation == a.rawValue
+                Button {
+                    animation = a.rawValue
+                    model.replaySettings() // show it straight away
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(a.title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+                        Text(a.detail)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(2, reservesSpace: true)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .topTrailing) {
+                        if selected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12)).foregroundStyle(Theme.green)
+                                .padding(10)
+                        }
+                    }
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(white: 0.075)))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(selected ? Theme.green.opacity(0.8) : .clear, lineWidth: 1.2))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScaleStyle())
+            }
+        }
     }
 
     private var topBar: some View {
@@ -183,23 +281,16 @@ struct SettingsPanel: View {
         .padding(.top, model.style == .notch ? 0 : 2)
     }
 
-    private func group<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.system(size: 9.5, weight: .bold))
-                .tracking(0.6)
-                .foregroundStyle(Color(white: 0.45))
-                .padding(.bottom, 2)
-            content()
-        }
-    }
-
     @ViewBuilder private var updatesRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 9) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Ledge \(Updater.versionText)")
-                        .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white)
+                        .font(.system(size: 12.5)).foregroundStyle(.white)
                     updateStatus
                 }
                 Spacer(minLength: 6)
@@ -209,12 +300,13 @@ struct SettingsPanel: View {
                 case .checking, .updating:
                     ProgressView().controlSize(.small)
                 default:
-                    Button("Check") { updater.check() }.buttonStyle(PillButtonStyle(prominent: false))
+                    Button("Check for updates") { updater.check() }.buttonStyle(PillButtonStyle(prominent: false))
                 }
             }
             if case let .available(changes) = updater.state {
                 ForEach(changes.prefix(3), id: \.self) {
                     Text("• \($0)").font(.system(size: 10.5)).foregroundStyle(Theme.secondaryText).lineLimit(1)
+                        .padding(.leading, 25)
                 }
             }
         }
@@ -240,6 +332,22 @@ struct SettingsPanel: View {
     }
 }
 
+/// A soft dark card that groups a few rows.
+struct Card<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(white: 0.075)))
+    }
+}
+
+struct CardDivider: View {
+    var body: some View {
+        Rectangle().fill(Color.white.opacity(0.06)).frame(height: 0.5).padding(.leading, 25)
+    }
+}
+
 // MARK: - Island-style controls
 
 /// A row with an icon, a label and an iOS-style switch.
@@ -261,7 +369,7 @@ struct SwitchRow: View {
             Spacer(minLength: 8)
             IslandSwitch(isOn: $isOn)
         }
-        .frame(height: 24)
+        .frame(height: 34)
         // Only the switch itself flips the setting, so a stray click on the row can't.
     }
 }
@@ -334,6 +442,8 @@ struct ChoiceRow2: View {
     var symbol: String
     @Binding var value: Int
     var options: [Int]
+    /// The text in the drop-down list (defaults to the pill's text).
+    var menuLabel: ((Int) -> String)? = nil
     var label: (Int) -> String
 
     var body: some View {
@@ -345,7 +455,7 @@ struct ChoiceRow2: View {
             Text(title).font(.system(size: 12.5)).foregroundStyle(.white).lineLimit(1)
             Spacer(minLength: 8)
             Menu {
-                ForEach(options, id: \.self) { o in Button(label(o)) { value = o } }
+                ForEach(options, id: \.self) { o in Button((menuLabel ?? label)(o)) { value = o } }
             } label: {
                 HStack(spacing: 4) {
                     Text(label(value))
@@ -361,6 +471,6 @@ struct ChoiceRow2: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
-        .frame(height: 24)
+        .frame(height: 34)
     }
 }
