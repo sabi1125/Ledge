@@ -19,6 +19,11 @@ enum Pref {
     static let awakeDefaultMinutes = "awakeDefaultMinutes"
     static let awakeKeepScreenOn = "awakeKeepScreenOn"
     static let awakeWhileCharging = "awakeWhileCharging"
+    static let pomoFocus = "pomoFocusMinutes"
+    static let pomoShort = "pomoShortMinutes"
+    static let pomoLong = "pomoLongMinutes"
+    static let pomoSessions = "pomoSessions"
+    static let pomoAutoStart = "pomoAutoStart"
 
     /// The island pages switched on in settings (Music uses "Show what's playing").
     static var enabledPages: Set<IslandPage> {
@@ -46,6 +51,11 @@ enum Pref {
             awakeDefaultMinutes: 60,
             awakeKeepScreenOn: true,
             awakeWhileCharging: false,
+            pomoFocus: 25,
+            pomoShort: 5,
+            pomoLong: 15,
+            pomoSessions: 4,
+            pomoAutoStart: true,
         ])
     }
 

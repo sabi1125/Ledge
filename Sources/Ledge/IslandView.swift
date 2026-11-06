@@ -202,7 +202,7 @@ struct CompactView: View {
                 if musicShowing {
                     ArtworkView(image: model.artwork, size: m.art, radius: m.art * 0.3)
                 } else {
-                    TimerBadge(size: m.art)
+                    TimerBadge(size: m.art, timer: timer)
                 }
                 songLine
                     .lineLimit(1)
@@ -224,7 +224,7 @@ struct CompactView: View {
                 if musicShowing {
                     ArtworkView(image: model.artwork, size: 22, radius: 6)
                 } else {
-                    TimerBadge(size: 22)
+                    TimerBadge(size: 22, timer: timer)
                 }
                 Spacer(minLength: model.notch.width)
                 if model.timerActive {
@@ -243,7 +243,7 @@ struct CompactView: View {
     private var songLine: Text {
         let size = model.pillFontSize
         guard musicShowing else {
-            return Text("Timer").font(.system(size: size, weight: .semibold)).foregroundColor(.white)
+            return Text(timer.live?.title ?? "Timer").font(.system(size: size, weight: .semibold)).foregroundColor(.white)
         }
         let title = Text(model.media.title ?? "")
             .font(.system(size: size, weight: .semibold))
@@ -255,13 +255,14 @@ struct CompactView: View {
     }
 }
 
-/// An orange timer icon, in place of album art when only the timer is running.
+/// The timer's (or pomodoro phase's) icon, in place of album art when only it is running.
 struct TimerBadge: View {
     var size: CGFloat
+    @ObservedObject var timer: TimerStore
     var body: some View {
-        Image(systemName: "timer")
+        Image(systemName: timer.live?.symbol ?? "timer")
             .font(.system(size: size * 0.62, weight: .semibold))
-            .foregroundStyle(Theme.timerOrange)
+            .foregroundStyle(timer.live?.color ?? Theme.timerOrange)
             .frame(width: size, height: size)
     }
 }
@@ -459,6 +460,16 @@ struct HUDView: View {
         case let .lowBattery(percent):
             statusRow(symbol: "exclamationmark.triangle.fill", title: "Low Battery", percent: percent,
                       battery: "battery.25percent", color: Theme.amber)
+        case let .pomodoro(ended, next, minutes):
+            let color = next.isBreak ? Theme.breakGreen : Theme.focusRed
+            HStack(spacing: 7 * k) {
+                Image(systemName: ended == .focus ? "checkmark" : "target").font(.system(size: 12 * k, weight: .bold))
+                Text(ended == .focus ? "Focus done" : "Break over").font(.system(size: 12.5 * k, weight: .semibold))
+                Spacer(minLength: 8)
+                Text(next == .focus ? "Focus · \(minutes) min" : "Break · \(minutes) min")
+                    .font(.system(size: 12.5 * k, weight: .semibold).monospacedDigit())
+            }
+            .foregroundStyle(color)
         case let .awakeOn(minutes):
             HStack(spacing: 7 * k) {
                 Image(systemName: "cup.and.saucer.fill").font(.system(size: 12 * k, weight: .semibold))

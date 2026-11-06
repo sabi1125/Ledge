@@ -234,6 +234,51 @@ final class CountdownTests: XCTestCase {
     }
 }
 
+final class PomodoroTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 1000)
+    let plan = PomodoroPlan(focusMinutes: 25, shortMinutes: 5, longMinutes: 15, sessions: 4)
+
+    func testCycleOfFourWithALongBreak() {
+        var p = Pomodoro(plan: plan)
+        var phases: [PomodoroPhase] = []
+        for _ in 0..<8 { phases.append(p.advance(at: t0, autoStart: false)) }
+        XCTAssertEqual(phases, [.shortBreak, .focus, .shortBreak, .focus, .shortBreak, .focus, .longBreak, .focus])
+        XCTAssertEqual(p.completedFocus, 0) // a new cycle after the long break
+    }
+
+    func testFinishingAFocusSessionStartsTheBreak() {
+        var p = Pomodoro(plan: plan)
+        p.start(at: t0)
+        XCTAssertNil(p.tick(at: t0.addingTimeInterval(24 * 60), autoStart: true))
+        let ended = p.tick(at: t0.addingTimeInterval(25 * 60), autoStart: true)
+        XCTAssertEqual(ended?.ended, .focus)
+        XCTAssertEqual(ended?.next, .shortBreak)
+        XCTAssertTrue(p.countdown.isRunning)
+        XCTAssertEqual(p.countdown.remaining(at: t0.addingTimeInterval(25 * 60)), 5 * 60, accuracy: 0.001)
+        XCTAssertEqual(p.completedFocus, 1)
+    }
+
+    func testWithoutAutoStartTheNextPhaseWaits() {
+        var p = Pomodoro(plan: plan)
+        p.start(at: t0)
+        _ = p.tick(at: t0.addingTimeInterval(25 * 60), autoStart: false)
+        XCTAssertFalse(p.countdown.isRunning)
+        XCTAssertEqual(p.phase, .shortBreak)
+    }
+
+    func testSessionNumberAndReset() {
+        var p = Pomodoro(plan: plan)
+        XCTAssertEqual(p.sessionNumber, 1)
+        p.advance(at: t0, autoStart: false) // break
+        p.advance(at: t0, autoStart: false) // focus 2
+        XCTAssertEqual(p.sessionNumber, 2)
+        XCTAssertEqual(p.nextPhase, .shortBreak)
+        p.reset()
+        XCTAssertEqual(p.phase, .focus)
+        XCTAssertEqual(p.sessionNumber, 1)
+    }
+}
+
 final class AwakeFormatTests: XCTestCase {
     func testRemaining() {
         XCTAssertEqual(formatAwakeRemaining(57 * 60 + 10), "58m")

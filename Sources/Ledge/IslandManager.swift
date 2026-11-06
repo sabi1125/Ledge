@@ -38,11 +38,12 @@ final class IslandManager {
         media.islands = { [weak self] in self?.models ?? [] }
         sync()
         // A running or paused timer shows in every island's compact view.
-        timer.$countdown
-            .map(\.isActive)
+        timer.$live
             .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] active in self?.models.forEach { $0.timerActive = active } }
+            .sink { [weak self] live in
+                self?.models.forEach { $0.timerTitle = live?.title ?? "Timer"; $0.timerActive = live != nil }
+            }
             .store(in: &cancellables)
         // Settings changes (pages switched on or off) reshape every island.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -79,7 +80,8 @@ final class IslandManager {
             } else {
                 let model = IslandModel()
                 model.onCommand = { [weak self] in self?.media.send($0) }
-                model.timerActive = timer.countdown.isActive
+                model.timerTitle = timer.live?.title ?? "Timer"
+                model.timerActive = timer.live != nil
                 model.onOpen = { Haptics.openTick() }
                 let controller = IslandController(displayID: id, model: model, calendar: calendar, notes: notes,
                                                   timer: timer, awake: awake, settings: settings, updater: updater,

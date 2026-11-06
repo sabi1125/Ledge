@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Stay awake: a short pop when it turns on or off.
         awake.onStart = { [weak self] minutes in self?.showIndicator(.awakeOn(minutes: minutes)) }
         awake.onEnd = { [weak self] in self?.showIndicator(.awakeOff) }
+        timer.onPhaseEnd = { [weak self] ended, next, minutes in
+            self?.showIndicator(.pomodoro(ended: ended, next: next, minutes: minutes))
+            Haptics.alert()
+        }
         timer.onFinish = { [weak self] in
             guard let self else { return }
             self.showIndicator(.timerDone(duration: self.timer.countdown.duration))

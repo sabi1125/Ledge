@@ -37,6 +37,10 @@ enum Snapshot {
             ("17-settings", .settings, nil, false, .music),
             ("f9-pill-settings", .settings, nil, false, .music),
             ("12-timer-page-idle", .expanded, nil, false, .timer),
+            ("22-pomo-focus", .expanded, nil, false, .timer),
+            ("23-pomo-break", .expanded, nil, false, .timer),
+            ("24-pomo-compact", .compact, nil, false, .music),
+            ("25-pomo-pop", .hud, .pomodoro(ended: .focus, next: .shortBreak, minutes: 5), false, .music),
             ("13-timer-page-running", .expanded, nil, false, .timer),
             ("14-timer-compact", .compact, nil, false, .music),
             ("15-timer-compact-music", .compact, nil, true, .music),
@@ -66,6 +70,11 @@ enum Snapshot {
             if name.contains("awake-on") { awakeStore.start(minutes: 60) }
             ExpandedView.snapshotMenu = name.contains("awake-menu")
             let timerStore = TimerStore()
+            if name.contains("pomo") {
+                timerStore.mode = .pomodoro
+                if name.contains("break") { timerStore.skipPomodoro() }
+                if !name.contains("pop") { timerStore.startPomodoro() }
+            }
             if name.contains("timer") {
                 timerStore.choose(minutes: 25)
                 if !name.contains("idle") { timerStore.start() }
@@ -87,7 +96,8 @@ enum Snapshot {
             media.isPlaying = playing
             media.timestamp = Date()
             model.media = media
-            model.timerActive = timerStore.countdown.isActive
+            model.timerTitle = timerStore.live?.title ?? "Timer"
+            model.timerActive = timerStore.live != nil
             let art = sampleArtwork()
             model.setArtwork(image: art, tint: ArtworkColor.tint(for: art) ?? Theme.defaultTint)
             model.forceShape(shape, hud: hud, page: page)

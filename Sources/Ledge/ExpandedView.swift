@@ -288,30 +288,15 @@ struct TimerPage: View {
     @Environment(\.isVisiblePage) private var visible
 
     var body: some View {
-        // Ticks only while it's on screen and counting down.
-        TimelineView(.animation(minimumInterval: 0.5, paused: !(visible && timer.countdown.isRunning))) { context in
-            let c = timer.countdown
+        // Ticks only while it's on screen and something is counting down.
+        TimelineView(.animation(minimumInterval: 0.5, paused: !(visible && timer.liveIsRunning))) { context in
             HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(formatCountdown(c.remaining(at: context.date)))
-                        .font(.system(size: 50, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(c.phase == .finished ? Theme.timerOrange : .white)
-                        .contentTransition(.numericText(countsDown: true))
-                        .animation(Theme.quick, value: Int(c.remaining(at: context.date)))
-                    Text(status(c, now: context.date))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.secondaryText)
-                    HStack(spacing: 8) {
-                        primaryButton(c)
-                        if c.isActive || c.phase == .finished {
-                            Button("Reset") { timer.reset() }.buttonStyle(TimerButtonStyle(primary: false))
-                        }
-                        Button("+1 min") { timer.addMinute() }.buttonStyle(TimerButtonStyle(primary: false))
-                    }
-                    .padding(.top, 2)
-                }
+                if timer.mode == .timer { timerLeft(now: context.date) } else { pomodoroLeft(now: context.date) }
                 Spacer(minLength: 8)
-                presets(c)
+                VStack(alignment: .trailing, spacing: 10) {
+                    ModeSwitch(mode: $timer.mode)
+                    if timer.mode == .timer { presets(timer.countdown) } else { nextUp }
+                }
             }
             .padding(.horizontal, 26)
             .padding(.bottom, 10)
@@ -319,17 +304,36 @@ struct TimerPage: View {
         }
     }
 
-    @ViewBuilder private func primaryButton(_ c: Countdown) -> some View {
-        switch c.phase {
-        case .running:
-            Button { timer.pause() } label: { Label("Pause", systemImage: "pause.fill") }
-                .buttonStyle(TimerButtonStyle(primary: true))
-        case .paused:
-            Button { timer.start() } label: { Label("Resume", systemImage: "play.fill") }
-                .buttonStyle(TimerButtonStyle(primary: true))
-        case .idle, .finished:
-            Button { timer.start() } label: { Label("Start", systemImage: "play.fill") }
-                .buttonStyle(TimerButtonStyle(primary: true))
+    // MARK: Timer
+
+    private func timerLeft(now: Date) -> some View {
+        let c = timer.countdown
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(formatCountdown(c.remaining(at: now)))
+                .font(.system(size: 50, weight: .semibold).monospacedDigit())
+                .foregroundStyle(c.phase == .finished ? Theme.timerOrange : .white)
+                .contentTransition(.numericText(countsDown: true))
+            Text(timerStatus(c))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 8) {
+                switch c.phase {
+                case .running:
+                    Button { timer.pause() } label: { Label("Pause", systemImage: "pause.fill") }
+                        .buttonStyle(TimerButtonStyle(primary: true))
+                case .paused:
+                    Button { timer.start() } label: { Label("Resume", systemImage: "play.fill") }
+                        .buttonStyle(TimerButtonStyle(primary: true))
+                case .idle, .finished:
+                    Button { timer.start() } label: { Label("Start", systemImage: "play.fill") }
+                        .buttonStyle(TimerButtonStyle(primary: true))
+                }
+                if c.isActive || c.phase == .finished {
+                    Button("Reset") { timer.reset() }.buttonStyle(TimerButtonStyle(primary: false))
+                }
+                Button("+1 min") { timer.addMinute() }.buttonStyle(TimerButtonStyle(primary: false))
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -347,7 +351,7 @@ struct TimerPage: View {
         .frame(width: 58 * 3 + 16)
     }
 
-    private func status(_ c: Countdown, now: Date) -> String {
+    private func timerStatus(_ c: Countdown) -> String {
         switch c.phase {
         case .idle: return "Pick a length, then Start"
         case .running:
@@ -357,10 +361,97 @@ struct TimerPage: View {
         case .finished: return "Done"
         }
     }
+
+    // MARK: Pomodoro
+
+    private func pomodoroLeft(now: Date) -> some View {
+        let p = timer.pomodoro
+        let color = p.phase.isBreak ? Theme.breakGreen : Theme.focusRed
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(p.phase == .focus ? "Focus · \(p.sessionNumber) of \(p.plan.sessions)" : p.phase.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(color)
+            Text(formatCountdown(p.countdown.remaining(at: now)))
+                .font(.system(size: 46, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+                .contentTransition(.numericText(countsDown: true))
+            SessionDots(total: p.plan.sessions, done: p.completedFocus, current: p.phase == .focus)
+            HStack(spacing: 8) {
+                if p.countdown.isRunning {
+                    Button { timer.pausePomodoro() } label: { Label("Pause", systemImage: "pause.fill") }
+                        .buttonStyle(TimerButtonStyle(primary: true, color: color))
+                } else {
+                    Button { timer.startPomodoro() } label: {
+                        Label(p.countdown.isActive ? "Resume" : "Start", systemImage: "play.fill")
+                    }
+                    .buttonStyle(TimerButtonStyle(primary: true, color: color))
+                }
+                Button("Skip") { timer.skipPomodoro() }.buttonStyle(TimerButtonStyle(primary: false))
+                Button("Reset") { timer.resetPomodoro() }.buttonStyle(TimerButtonStyle(primary: false))
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var nextUp: some View {
+        let p = timer.pomodoro
+        let next = p.nextPhase
+        let minutes = Int(p.plan.length(of: next) / 60)
+        let label = next == .focus ? "Focus · \(min(p.completedFocus + 1, p.plan.sessions)) of \(p.plan.sessions)"
+                                   : "\(next.title) · \(minutes) min"
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text("Next").font(.system(size: 10.5, weight: .medium)).foregroundStyle(Theme.secondaryText)
+            Text(label).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+        }
+        .frame(width: 58 * 3 + 16, alignment: .trailing)
+    }
+}
+
+/// Timer / Pomodoro switch.
+struct ModeSwitch: View {
+    @Binding var mode: TimerStore.Mode
+
+    var body: some View {
+        HStack(spacing: 2) {
+            option("Timer", .timer)
+            option("Pomodoro", .pomodoro)
+        }
+        .padding(2)
+        .background(Capsule().fill(Color(white: 0.12)))
+    }
+
+    private func option(_ title: String, _ value: TimerStore.Mode) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(mode == value ? Color.white : Theme.secondaryText)
+            .padding(.horizontal, 11)
+            .frame(height: 22)
+            .background(Capsule().fill(mode == value ? Color(white: 0.24) : .clear))
+            .contentShape(Capsule())
+            .onTapGesture { withAnimation(Theme.quick) { mode = value } }
+    }
+}
+
+/// One dot per focus session in the cycle: done, current, still to come.
+struct SessionDots: View {
+    var total: Int
+    var done: Int
+    var current: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<total, id: \.self) { i in
+                Circle()
+                    .fill(i < done ? Theme.focusRed : (i == done && current ? Color.white : Color(white: 0.22)))
+                    .frame(width: 7, height: 7)
+            }
+        }
+    }
 }
 
 struct TimerButtonStyle: ButtonStyle {
     var primary: Bool
+    var color: Color = Theme.timerOrange
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 11.5, weight: .semibold))
@@ -370,7 +461,7 @@ struct TimerButtonStyle: ButtonStyle {
             .foregroundStyle(primary ? Color.black : Color.white)
             .padding(.horizontal, 11)
             .padding(.vertical, 5)
-            .background(Capsule().fill(primary ? Theme.timerOrange : Color(white: 0.2)))
+            .background(Capsule().fill(primary ? color : Color(white: 0.2)))
             .opacity(configuration.isPressed ? 0.7 : 1)
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(Theme.quick, value: configuration.isPressed)
@@ -390,22 +481,21 @@ struct PresetButtonStyle: ButtonStyle {
     }
 }
 
-/// The live countdown shown beside the notch or in the pill.
+/// The live countdown (timer or pomodoro) shown beside the notch or in the pill.
 struct CountdownLabel: View {
     @ObservedObject var timer: TimerStore
     var size: CGFloat
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1, paused: !timer.countdown.isRunning)) { context in
-            Text(formatCountdown(timer.countdown.remaining(at: context.date)))
+        TimelineView(.animation(minimumInterval: 1, paused: !timer.liveIsRunning)) { context in
+            Text(formatCountdown(timer.liveRemaining(at: context.date)))
                 .font(.system(size: size, weight: .semibold).monospacedDigit())
-                .foregroundStyle(timer.countdown.isRunning ? Theme.timerOrange : Theme.secondaryText)
+                .foregroundStyle(timer.liveIsRunning ? (timer.live?.color ?? Theme.timerOrange) : Theme.secondaryText)
                 .lineLimit(1)
                 .fixedSize()
         }
     }
 }
-
 
 // MARK: - Stay awake
 

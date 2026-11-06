@@ -11,6 +11,7 @@ enum HUD: Equatable {
     case lowBattery(percent: Int)
     case timerDone(duration: TimeInterval)
     case awakeOn(minutes: Int)
+    case pomodoro(ended: PomodoroPhase, next: PomodoroPhase, minutes: Int)
     case awakeOff
 }
 
@@ -31,6 +32,8 @@ final class IslandModel: ObservableObject {
     @Published private(set) var isExpanded = false
     /// A countdown is running or paused: it lives in the notch's right wing.
     @Published var timerActive = false { didSet { if timerActive != oldValue { recompute() } } }
+    /// "Timer", "Focus", "Short break"… (sizes the floating pill).
+    var timerTitle = "Timer"
     /// Called when the island opens, for the trackpad tick.
     var onOpen: (() -> Void)?
 
@@ -125,6 +128,7 @@ final class IslandModel: ObservableObject {
         case .charging, .lowBattery: seconds = 2.6
         case .timerDone: seconds = 6
         case .awakeOn, .awakeOff: seconds = 1.8
+        case .pomodoro: seconds = 4
         }
         hudTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -202,7 +206,7 @@ final class IslandModel: ObservableObject {
         // On the notch, the countdown needs slightly wider wings than the music bars.
         guard style == .floating else { return timerActive ? notch.width + 2 * 52 : nil }
         let musicShowing = hasMedia && media.isPlaying
-        let title = musicShowing ? (media.title ?? "") : "Timer"
+        let title = musicShowing ? (media.title ?? "") : timerTitle
         let artist = musicShowing ? (media.artist ?? "") : ""
         let bold = NSFont.systemFont(ofSize: pillFontSize, weight: .semibold)
         let plain = NSFont.systemFont(ofSize: pillFontSize, weight: .regular)

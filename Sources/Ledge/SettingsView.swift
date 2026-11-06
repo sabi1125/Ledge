@@ -41,6 +41,12 @@ struct SettingsPanel: View {
     @AppStorage(Pref.awakeDefaultMinutes) private var awakeMinutes = 60
     @AppStorage(Pref.awakeKeepScreenOn) private var awakeScreenOn = true
     @AppStorage(Pref.awakeWhileCharging) private var awakeCharging = false
+    // Pomodoro
+    @AppStorage(Pref.pomoFocus) private var pomoFocus = 25
+    @AppStorage(Pref.pomoShort) private var pomoShort = 5
+    @AppStorage(Pref.pomoLong) private var pomoLong = 15
+    @AppStorage(Pref.pomoSessions) private var pomoSessions = 4
+    @AppStorage(Pref.pomoAutoStart) private var pomoAutoStart = true
 
     /// The snapshot tool can't draw scroll views, so it turns this off.
     static var scrolls = true
@@ -75,6 +81,17 @@ struct SettingsPanel: View {
                             SwitchRow(title: "Open on hover", symbol: "cursorarrow.motionlines", isOn: $openOnHover)
                             SwitchRow(title: "Trackpad tick", symbol: "hand.tap", isOn: $haptics)
                             SwitchRow(title: "Show on other displays", symbol: "display.2", isOn: $showOnOtherDisplays)
+                        }
+                        group("Pomodoro") {
+                            ChoiceRow2(title: "Focus", symbol: "target", value: $pomoFocus,
+                                       options: [15, 20, 25, 30, 45, 50, 60]) { "\($0) min" }
+                            ChoiceRow2(title: "Short break", symbol: "leaf", value: $pomoShort,
+                                       options: [3, 5, 10, 15]) { "\($0) min" }
+                            ChoiceRow2(title: "Long break", symbol: "leaf.fill", value: $pomoLong,
+                                       options: [10, 15, 20, 25, 30]) { "\($0) min" }
+                            ChoiceRow2(title: "Sessions before a long break", symbol: "circle.grid.2x2", value: $pomoSessions,
+                                       options: [2, 3, 4, 5, 6]) { "\($0)" }
+                            SwitchRow(title: "Start the next phase by itself", symbol: "arrow.forward.circle", isOn: $pomoAutoStart)
                         }
 
                     }
@@ -245,8 +262,7 @@ struct SwitchRow: View {
             IslandSwitch(isOn: $isOn)
         }
         .frame(height: 24)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(Theme.quick) { isOn.toggle() } }
+        // Only the switch itself flips the setting, so a stray click on the row can't.
     }
 }
 
@@ -309,5 +325,42 @@ struct PillButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.7 : 1)
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(Theme.quick, value: configuration.isPressed)
+    }
+}
+
+/// A row with an icon, a label and a pill that opens a short list of choices.
+struct ChoiceRow2: View {
+    var title: String
+    var symbol: String
+    @Binding var value: Int
+    var options: [Int]
+    var label: (Int) -> String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(width: 16)
+            Text(title).font(.system(size: 12.5)).foregroundStyle(.white).lineLimit(1)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.self) { o in Button(label(o)) { value = o } }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(label(value))
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                }
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10).frame(height: 21)
+                .background(Capsule().fill(Color(white: 0.2)))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .frame(height: 24)
     }
 }
