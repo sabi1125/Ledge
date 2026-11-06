@@ -176,7 +176,6 @@ struct PlayerView: View {
             VStack(spacing: 10) {
                 HStack(spacing: 12) {
                     ArtworkView(image: model.artwork, size: 56, radius: 12)
-                        .shadow(color: model.tint.opacity(0.35), radius: 12)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(model.media.title ?? "")
                             .font(.system(size: 14, weight: .semibold))

@@ -151,7 +151,52 @@ final class IslandController {
             panel = p
         }
         panel?.setFrame(panelFrame, display: true)
-        panel?.orderFrontRegardless()
+        if !isHidden { panel?.orderFrontRegardless() }
+    }
+
+    /// Hidden while something is full screen on this screen (floating pills only).
+    private(set) var isSuppressed = false
+    /// Hidden for a moment while macOS switches Spaces (going full screen, leaving it, or
+    /// swiping between desktops), so the pill never flashes onto the new view.
+    private var isPausedForSwitch = false
+    private var switchTimer: Timer?
+    private var isHidden: Bool { isSuppressed || isPausedForSwitch }
+
+    func setSuppressed(_ hidden: Bool) {
+        guard hidden != isSuppressed else { return }
+        isSuppressed = hidden
+        applyVisibility()
+    }
+
+    /// Called the moment a Space switch starts; the pill comes back once it has settled.
+    func pauseForSpaceSwitch(_ seconds: TimeInterval = 0.5) {
+        isPausedForSwitch = true
+        applyVisibility()
+        switchTimer?.invalidate()
+        switchTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.isPausedForSwitch = false
+                self?.applyVisibility()
+            }
+        }
+    }
+
+    /// Hides at once (no flash), and fades back in gently.
+    private func applyVisibility() {
+        guard let panel else { return }
+        if isHidden {
+            if model.isExpanded { model.close() }
+            panel.ignoresMouseEvents = true
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+        } else if !panel.isVisible || panel.alphaValue < 1 {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                panel.animator().alphaValue = 1
+            }
+        }
     }
 
     /// The area that currently counts as "the island" for the pointer.
@@ -192,7 +237,7 @@ final class IslandController {
     }
 
     private func updatePointer() {
-        guard let panel, panel.isVisible else { return }
+        guard let panel, panel.isVisible, !isHidden else { return }
         var inside = hitRect().contains(NSEvent.mouseLocation)
         // While a mouse button is held (dragging a window, selecting text, resizing), passing
         // over the notch shouldn't open the island. A drag that started on the island
