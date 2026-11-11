@@ -23,13 +23,21 @@ public struct QuickEventDraft: Equatable, Sendable {
 ///
 /// Understands: today, tonight, tomorrow (tmrw), weekdays (mon, friday, next fri), times (3pm,
 /// 3:30pm, 15:00, at 7, noon, midnight), ranges (7-8pm, 11-1pm, 9:30 to 10:15am), lengths
-/// (for 90 min, for 2h) and, on macOS, written dates such as "Nov 20" or "12/3".
+/// (for 90 min, for 2h), next week and, on macOS, written dates such as "Nov 20", "12/3",
+/// "2026-12-20" or "in 3 days", and ranges from one date to another ("Jan 20 to Jan 25").
 public enum QuickEventParser {
     public static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current,
                              defaultDuration: TimeInterval = 3600) -> QuickEventDraft {
         let ns = text as NSString
         var used: [NSRange] = []
         func isFree(_ r: NSRange) -> Bool { !used.contains { NSIntersectionRange($0, r).length > 0 } }
+
+        // From one date to another: "Jan 20 2027 to Jan 25 2027", "Dec 20-23", "12/20 - 12/23",
+        // "Dec 20 9am to Dec 21 5pm". Read as a whole first, so its two halves aren't taken apart.
+        if let found = dateRange(in: text, calendar: calendar) {
+            let title = cleanTitle(ns, removing: [found.range])
+            return QuickEventDraft(title: title, start: found.start, end: found.end, isAllDay: found.isAllDay, foundDate: true)
+        }
 
         // Times of day, as minutes after midnight.
         var startMinutes: Int?
@@ -75,6 +83,13 @@ public enum QuickEventParser {
                     day = calendar.date(byAdding: .day, value: ahead, to: today)
                 }
             }
+        }
+        // "next week": its Monday.
+        if day == nil, let found = firstMatch(Pattern.nextWeek, in: text, ns, isFree, read: { _, _ in true }) {
+            used.append(found.0.range)
+            let current = calendar.component(.weekday, from: today) // 1 is Sunday
+            let toMonday = (2 - current + 7) % 7
+            day = calendar.date(byAdding: .day, value: toMonday == 0 ? 7 : toMonday, to: today)
         }
         if day == nil, let found = writtenDate(in: text, used: used) {
             used.append(found.0)
@@ -133,8 +148,12 @@ public enum QuickEventParser {
         static let duration = make(#"(?<![\w])for\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)(?![\w])"#)
         /// today, tonight, tomorrow, (next) friday, on mon…
         static let day = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?(next\s+|this\s+)?(today|tonight|tomorrow|tmrw|tmr|monday|mon|tuesday|tues|tue|wednesday|weds|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)(?![\w])"#)
-        /// Written dates the system date reader may find (month names or 12/3).
-        static let writtenDate = make(#"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d|\d\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}/\d{1,2}"#)
+        /// Written dates the system date reader may find: month names, 12/3, 2026-12-20, in 3 days.
+        static let writtenDate = make(#"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d|\d\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}/\d{1,2}|\d{4}-\d{1,2}-\d{1,2}|(?<![\w])in\s+\d+\s+(days?|weeks?|months?)(?![\w])"#)
+        /// next week
+        static let nextWeek = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?next\s+week(?![\w])"#)
+        /// A time of day inside a date range ("Dec 20 9am to Dec 21 5pm").
+        static let anyTime = make(#"\d\s*(am|pm|a\.m\.|p\.m\.)(?![\w])|\d:[0-5]\d|(?<![\w])(noon|midnight)(?![\w])"#)
         /// Quotes left empty once the date inside them is taken out: review "due friday".
         static let emptyQuotes = make(#"["“”'‘’「」『』]\s*["“”'‘’「」『』]"#)
         static let danglingWord = make(#"^(?:at|on|from|by|for|@|-|–|—|,)\s+|\s+(?:at|on|from|by|for|@|-|–|—|,)$"#)
@@ -248,10 +267,52 @@ public enum QuickEventParser {
         return nil
     }
 
+    /// "Jan 20 2027 to Jan 25 2027", "Dec 20-23": the system's date reader returns the first date and
+    /// how long the range lasts. Without times it's all day, both ends included.
+    private static func dateRange(in text: String, calendar: Calendar) -> (range: NSRange, start: Date, end: Date, isAllDay: Bool)? {
+        #if canImport(Darwin)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return nil }
+        let ns = text as NSString
+        for m in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            guard var date = m.date, m.duration > 0 else { continue }
+            let piece = ns.substring(with: m.range)
+            let whole = NSRange(location: 0, length: (piece as NSString).length)
+            // Only real dates ("3pm to 5pm" on its own is a time range, read the usual way).
+            guard Pattern.writtenDate.firstMatch(in: piece, range: whole) != nil else { continue }
+            let end = date.addingTimeInterval(m.duration)
+            // "Dec 20 to Dec 23 2027": the year written once belongs to both ends (the reader takes
+            // the first date as this year, which would make it a range of more than a year).
+            while end.timeIntervalSince(date) > 330 * 86_400, let later = calendar.date(byAdding: .year, value: 1, to: date) {
+                date = later
+            }
+            if Pattern.anyTime.firstMatch(in: piece, range: whole) != nil {
+                return (m.range, date, end, false)
+            }
+            let first = calendar.startOfDay(for: date)
+            let last = calendar.startOfDay(for: end)
+            guard let after = calendar.date(byAdding: .day, value: 1, to: last), after > first else { continue }
+            return (m.range, first, after, true)
+        }
+        #endif
+        return nil
+    }
+
     /// Takes out the date and time words, and tidies the spaces and leftover joining words.
     private static func cleanTitle(_ ns: NSString, removing ranges: [NSRange]) -> String {
         let out = NSMutableString(string: ns)
-        for r in ranges.sorted(by: { $0.location > $1.location }) {
+        // Overlapping pieces (the system's date reader can match across a time already taken out)
+        // are merged first: cutting them one by one would run past the end of the shortened text.
+        var merged: [NSRange] = []
+        for r in ranges.sorted(by: { $0.location < $1.location }) where r.location != NSNotFound {
+            let clipped = NSIntersectionRange(r, NSRange(location: 0, length: ns.length))
+            guard clipped.length > 0 else { continue }
+            if let last = merged.last, clipped.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, clipped)
+            } else {
+                merged.append(clipped)
+            }
+        }
+        for r in merged.reversed() {
             out.replaceCharacters(in: r, with: " ")
         }
         var title = (out as String).split(whereSeparator: \.isWhitespace).joined(separator: " ")

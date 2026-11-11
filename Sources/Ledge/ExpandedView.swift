@@ -206,7 +206,11 @@ struct CalendarPage: View {
             Group {
                 switch calendar.access {
                 case .granted:
-                    EventList(events: calendar.events, justAddedID: calendar.justAddedID) { model.beginQuickAdd() }
+                    EventList(events: calendar.events, justAddedID: calendar.justAddedID,
+                              onOpen: { id in
+                                  calendar.openInCalendar(id)
+                                  model.closeForHandOff()
+                              }) { model.beginQuickAdd() }
                 case .notAsked:
                     Message(title: "See your upcoming events here",
                             detail: "Ledge reads the calendars you've added to the Calendar app.",
@@ -254,6 +258,8 @@ private struct EventList: View {
     var events: [CalendarItem]
     /// The event quick add just saved: highlighted, and scrolled into view.
     var justAddedID: String?
+    /// Click an event: open it in the Calendar app.
+    var onOpen: (String) -> Void
     var onAdd: () -> Void
     /// How far (pt) the list goes on below what's showing, for the "+N more" hint.
     @State private var hiddenBelow: CGFloat = 0
@@ -286,7 +292,8 @@ private struct EventList: View {
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 7) {
                             ForEach(upcoming) { event in
-                                EventRow(event: event, now: context.date, isNew: event.id == justAddedID)
+                                EventRow(event: event, now: context.date, isNew: event.id == justAddedID,
+                                         onOpen: event.eventID.map { id in { onOpen(id) } })
                                     .id(event.id)
                             }
                         }
@@ -337,6 +344,9 @@ private struct EventRow: View {
     var event: CalendarItem
     var now: Date
     var isNew = false
+    /// Click the row: open the event in the Calendar app. (Join has its own button.)
+    var onOpen: (() -> Void)?
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 9) {
@@ -361,10 +371,16 @@ private struct EventRow: View {
                     .transition(.opacity)
             }
         }
-        // A soft light behind a just-added event that fades away.
+        // A soft light behind a just-added event that fades away, and a fainter one on hover
+        // (the row opens the event in Calendar).
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(isNew ? 0.08 : 0)))
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(Color.white.opacity(isNew ? 0.08 : (hovering && onOpen != nil ? 0.06 : 0))))
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
+        .onTapGesture { onOpen?() }
+        .help(onOpen == nil ? "" : "Open in Calendar")
         .padding(.horizontal, -8)
         .padding(.vertical, -2)
         .animation(.easeOut(duration: 0.6), value: isNew)

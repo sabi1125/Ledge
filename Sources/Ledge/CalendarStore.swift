@@ -11,6 +11,8 @@ struct CalendarItem: Identifiable, Equatable {
     var isAllDay: Bool
     var color: Color
     var joinURL: URL?
+    /// The Calendar app's id for the event (to open it there). Nil for sample events.
+    var eventID: String? = nil
 
     func isOngoing(at now: Date) -> Bool { start <= now && now < end }
 }
@@ -104,7 +106,8 @@ final class CalendarStore: ObservableObject {
                     title: e.title?.isEmpty == false ? e.title! : "Untitled",
                     start: e.startDate, end: e.endDate, isAllDay: e.isAllDay,
                     color: Color(nsColor: e.calendar?.color ?? .systemBlue),
-                    joinURL: MeetingLink.find(in: [e.url?.absoluteString, e.location, e.notes]))
+                    joinURL: MeetingLink.find(in: [e.url?.absoluteString, e.location, e.notes]),
+                    eventID: e.eventIdentifier)
             }
         if Array(found) != events { events = Array(found) }
         let color = Color(nsColor: quickAddCalendar?.color ?? .systemPurple)
@@ -156,6 +159,14 @@ final class CalendarStore: ObservableObject {
         }
         refresh()
         return .success(AddedEvent(eventID: event.eventIdentifier ?? "", listID: listID, draft: draft))
+    }
+
+    /// Opens the Calendar app on this event (its day, with the event selected).
+    func openInCalendar(_ eventID: String) {
+        let id = eventID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? eventID
+        guard let url = URL(string: "ical://ekevent/\(id)?method=show&options=more") else { return }
+        LedgeLog.shared.write("calendar: opening an event in Calendar")
+        NSWorkspace.shared.open(url)
     }
 
     /// Removes an event quick add just saved (Undo).

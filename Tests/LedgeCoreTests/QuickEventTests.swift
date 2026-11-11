@@ -134,4 +134,71 @@ final class QuickEventTests: XCTestCase {
         XCTAssertEqual(parse("Dinner on friday at 7pm").title, "Dinner")
         XCTAssertEqual(parse("Meet at the cafe tomorrow 3pm").title, "Meet at the cafe")
     }
+
+    /// A date and a time on each side used to crash (overlapping pieces taken out of the title).
+    func testTwoDatesWithTimesDoNotCrash() {
+        let d = QuickEventParser.parse("Conf Dec 20 9am to Dec 21 5pm")
+        XCTAssertEqual(d.title, "Conf")
+        XCTAssertTrue(d.foundDate)
+    }
+
+    // MARK: From one date to another, and more ways to write a date
+
+    private func day(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Date {
+        Calendar.current.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+
+    func testDateRangeWithYears() {
+        let d = QuickEventParser.parse("gunma trip jan 20 2027 to jan 25 2027")
+        XCTAssertEqual(d.title, "gunma trip")
+        XCTAssertTrue(d.isAllDay)
+        XCTAssertEqual(d.start, day(2027, 1, 20))
+        XCTAssertEqual(d.end, day(2027, 1, 26)) // all day through Jan 25
+    }
+
+    func testDateRangeShortForms() {
+        for text in ["Trip Dec 20 to Dec 23 2027", "Trip from Dec 20 to Dec 23 2027", "Trip Dec 20-23 2027", "Trip 12/20/2027 - 12/23/2027"] {
+            let d = QuickEventParser.parse(text)
+            XCTAssertEqual(d.title, "Trip", text)
+            XCTAssertTrue(d.isAllDay, text)
+            XCTAssertEqual(d.start, day(2027, 12, 20), text)
+            XCTAssertEqual(d.end, day(2027, 12, 24), text)
+        }
+    }
+
+    func testDateRangeWithTimes() {
+        let d = QuickEventParser.parse("Conf Dec 20 2027 9am to Dec 21 2027 5pm")
+        XCTAssertEqual(d.title, "Conf")
+        XCTAssertFalse(d.isAllDay)
+        XCTAssertEqual(d.start, day(2027, 12, 20, 9))
+        XCTAssertEqual(d.end, day(2027, 12, 21, 17))
+    }
+
+    func testTimeRangeOnOneDayIsUnchanged() {
+        let d = QuickEventParser.parse("Meeting Dec 20 2027 3-5pm")
+        XCTAssertEqual(d.title, "Meeting")
+        XCTAssertEqual(d.start, day(2027, 12, 20, 15))
+        XCTAssertEqual(d.end, day(2027, 12, 20, 17))
+    }
+
+    func testISODate() {
+        let d = QuickEventParser.parse("Dentist 2027-12-20 3pm")
+        XCTAssertEqual(d.title, "Dentist")
+        XCTAssertEqual(d.start, day(2027, 12, 20, 15))
+    }
+
+    func testInSomeDays() {
+        let now = day(2026, 11, 11, 10)
+        let d = QuickEventParser.parse("Call mom in 3 days", now: now)
+        XCTAssertEqual(d.title, "Call mom")
+        XCTAssertTrue(d.isAllDay)
+        XCTAssertEqual(d.start, day(2026, 11, 14))
+    }
+
+    func testNextWeekIsItsMonday() {
+        let wednesday = day(2026, 11, 11, 10)
+        let d = QuickEventParser.parse("Plan the trip next week", now: wednesday)
+        XCTAssertEqual(d.title, "Plan the trip")
+        XCTAssertEqual(d.start, day(2026, 11, 16))
+    }
 }

@@ -20,6 +20,8 @@ struct QuickAddView: View {
     @State private var settleTask: Task<Void, Never>?
     @State private var saved: Saved?
     @State private var error: String?
+    /// The pointer is on the "Added" confirmation: it stays until you move away (to reach its buttons).
+    @State private var overConfirmation = false
     @FocusState private var focus: Field?
     /// The window this copy of quick add is in. The pill on another screen has a hidden twin window
     /// (for full-screen desktops) showing the same quick add; only the copy in the window you're
@@ -385,6 +387,8 @@ struct QuickAddView: View {
             // A short confirmation, then back to the list (the new item stays highlighted there).
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(1200))
+                // Held open while the pointer is on it, so Undo or Open in… can be clicked.
+                while overConfirmation && saved == done { try? await Task.sleep(for: .milliseconds(200)) }
                 guard saved == done else { return }
                 model.endQuickAdd()
             }
@@ -436,7 +440,23 @@ struct QuickAddView: View {
             .keyboardShortcut("z", modifiers: .command)
             .font(.system(size: 10.5))
             .foregroundStyle(Theme.secondaryText)
+            // Open it in its app, e.g. to add a location or invitees.
+            switch saved {
+            case .event(let e) where !e.eventID.isEmpty:
+                OpenInAppButton(color: Theme.calendarRed, help: "Open in Calendar") {
+                    calendar.openInCalendar(e.eventID)
+                    model.closeForHandOff()
+                }
+            case .todo(let t):
+                OpenInAppButton(color: Theme.remindersBlue, help: "Open in Reminders") {
+                    todos.openInReminders(t.id)
+                    model.closeForHandOff()
+                }
+            default:
+                EmptyView()
+            }
         }
+        .onHover { overConfirmation = $0 }
         .frame(maxHeight: .infinity)
     }
 
@@ -456,8 +476,21 @@ struct QuickAddView: View {
         } else {
             day = draft.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         }
-        if draft.isAllDay { return "\(day) · All day" }
+        let short = { (d: Date) in d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
         let time = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
+        if draft.isAllDay {
+            // Several days: "Wed, Jan 20 – Mon, Jan 25 · All day" (the end is the day after the last).
+            let last = cal.date(byAdding: .day, value: -1, to: draft.end) ?? draft.end
+            if !cal.isDate(last, inSameDayAs: draft.start), last > draft.start {
+                return "\(short(draft.start)) – \(short(last)) · All day"
+            }
+            return "\(day) · All day"
+        }
+        if !cal.isDate(draft.end, inSameDayAs: draft.start),
+           draft.end.timeIntervalSince(draft.start) > 24 * 3600 || cal.component(.hour, from: draft.end) > 6 {
+            // Runs into another day: "Sun, Dec 20, 9:00 AM – Mon, Dec 21, 5:00 PM".
+            return "\(short(draft.start)), \(time(draft.start)) – \(short(draft.end)), \(time(draft.end))"
+        }
         return "\(day), \(time(draft.start)) – \(time(draft.end))"
     }
 
