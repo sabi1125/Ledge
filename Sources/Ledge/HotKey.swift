@@ -14,7 +14,9 @@ final class HotKey {
         Self.installHandlerIfNeeded()
         Self.actions[id] = action
         let hotKeyID = EventHotKeyID(signature: OSType(0x4C44_4745), id: id) // "LDGE"
-        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        // Fails when another app already uses the same shortcut.
+        if status != noErr { LedgeLog.shared.write("hotkey \(id): couldn't register (\(status)), another app may use it") }
     }
 
     deinit {

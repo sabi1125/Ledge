@@ -73,6 +73,7 @@ struct SettingsPanel: View {
     @AppStorage(Pref.pomoAutoStart) private var pomoAutoStart = true
 
     @State private var section: Section = SettingsPanel.startSection
+    @Namespace private var highlight
 
     /// The snapshot tool can't draw scroll views, so it turns this off.
     static var scrolls = true
@@ -106,7 +107,7 @@ struct SettingsPanel: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Section.allCases) { s in
-                Button { withAnimation(.smooth(duration: 0.2)) { section = s } } label: {
+                Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { section = s } } label: {
                     HStack(spacing: 9) {
                         Image(systemName: s.symbol)
                             .font(.system(size: 11, weight: .semibold))
@@ -117,8 +118,14 @@ struct SettingsPanel: View {
                     .foregroundStyle(section == s ? Color.white : Theme.secondaryText)
                     .padding(.horizontal, 10)
                     .frame(height: 30)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(section == s ? Color(white: 0.14) : .clear))
+                    .background {
+                        // One highlight that slides to the chosen section.
+                        if section == s {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color(white: 0.14))
+                                .matchedGeometryEffect(id: "section", in: highlight)
+                        }
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -213,7 +220,7 @@ struct SettingsPanel: View {
             }
         }
         .id(section)
-        .transition(.opacity)
+        .transition(IslandAnimation.swap)
     }
 
     private func hint(_ text: String) -> some View {

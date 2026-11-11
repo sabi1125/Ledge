@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Combine
 import LedgeCore
 import SwiftUI
@@ -22,7 +23,7 @@ final class IslandPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
     }
 
-    /// Only takes keyboard focus for typing in Notes, so clicking music buttons never
+    /// Only takes keyboard focus for typing (Notes, quick add) and settings, so clicking music buttons never
     /// pulls focus away from the app you're working in.
     var allowsKey: () -> Bool = { false }
     override var canBecomeKey: Bool { allowsKey() }
@@ -81,19 +82,32 @@ final class IslandController {
             .store(in: &cancellables)
         installMonitors()
 
+        // ⌘T adds a to-do while the island is open on the to-do list. It's taken from other apps
+        // only during that time (while you're looking at Ledge), and given back as soon as it closes.
+        model.objectWillChange
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateTodoShortcut() } }
+            .store(in: &cancellables)
+
         // Leaving Notes or closing: hand keyboard focus back to the app you were in.
         model.onEndTyping = { [weak self] in self?.giveBackFocus() }
+        // Quick add (and an opened to-do) take the keyboard right away. Ledge becomes the active
+        // app while you type, like Spotlight does, so every key comes to it: ⌘N, ⌘↩, ⌘C, Esc…
+        // (A floating window that only borrows the keyboard doesn't reliably get command keys,
+        // especially on a full-screen desktop.) When you're done, the app you were in gets it back.
+        model.onBeginTyping = { [weak self] in self?.takeKeyboard() }
+        // Opening a note or to-do in its own app: that app takes over, so don't switch back.
+        model.onHandOff = { [weak self] in self?.previousApp = nil }
         // Settings takes keyboard focus while open (for Esc), and gives it back after.
         model.onSettingsShown = { [weak self] shown in
-            guard let self, let panel = self.panel else { return }
-            if shown { panel.makeKey() } else { self.giveBackFocus() }
+            if shown { self?.takeKeyboard() } else { self?.giveBackFocus() }
         }
     }
 
     /// Debug only: saves the island as images every few milliseconds, to check animations.
     func recordFrames(to dir: String, seconds: TimeInterval = 2.4, every interval: TimeInterval = 0.04) {
-        guard let view = panel?.contentView else { return }
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        guard let view = panel?.contentView else { LedgeLog.shared.write("record: no panel"); return }
+        do { try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true) }
+        catch { LedgeLog.shared.write("record: can't make \(dir): \(error.localizedDescription)") }
         let start = Date()
         var index = 0
         Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { t in
@@ -108,10 +122,190 @@ final class IslandController {
         }
     }
 
+    private var todoHotKey: HotKey?
+    private var escapeHotKey: HotKey?
+    private var newNoteHotKey: HotKey?
+    private var newItemHotKey: HotKey?
+    private var pageHotKeys: [HotKey] = []
+
+    /// Esc steps back one level: notes → title line → cancel quick add; an open to-do → the list;
+    /// settings or the open island → closed.
+    @discardableResult
+    private func handleEscape() -> Bool {
+        let m = model
+        if m.isShowingSettings { m.closeSettings(); return true }
+        if m.isQuickAdding {
+            if m.quickAddShowsNotes && !m.quickAddIsConfirming { m.quickAddShowsNotes = false }
+            else { m.cancelQuickAdd() }
+            return true
+        }
+        if m.openTodoID != nil { m.closeTodo(); return true }
+        guard m.isExpanded else { return false }
+        m.close()
+        return true
+    }
+
+    /// Tab / ⇧Tab in a notes box (not a one-line field): indent or outdent the line by 4 spaces.
+    private static func indentNotes(for e: NSEvent) -> Bool {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isDisjoint(with: [.command, .control, .option]),
+              let window = e.window as? IslandPanel, window.isKeyWindow,
+              let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor else { return false }
+        let text = editor.string as NSString
+        let selection = editor.selectedRange()
+        let lineRange = text.lineRange(for: NSRange(location: selection.location, length: 0))
+        let line = text.substring(with: lineRange)
+        func replace(_ range: NSRange, with string: String) {
+            guard editor.shouldChangeText(in: range, replacementString: string) else { return }
+            editor.replaceCharacters(in: range, with: string)
+            editor.didChangeText()
+        }
+        if flags.contains(.shift) {
+            let spaces = line.prefix(4).prefix { $0 == " " }.count
+            let remove = spaces > 0 ? spaces : (line.hasPrefix("\t") ? 1 : 0)
+            guard remove > 0 else { return true }
+            replace(NSRange(location: lineRange.location, length: remove), with: "")
+            editor.setSelectedRange(NSRange(location: max(lineRange.location, selection.location - remove), length: selection.length))
+        } else if Checklist.isListLine(line) {
+            // The whole list item moves in, wherever the cursor is in it.
+            replace(NSRange(location: lineRange.location, length: 0), with: "    ")
+            editor.setSelectedRange(NSRange(location: selection.location + 4, length: selection.length))
+        } else {
+            replace(selection, with: "    ")
+        }
+        return true
+    }
+
+    /// In a notes box (not a one-line field): "[" types "[]" with the cursor between them; "]"
+    /// right before a "]" just steps over it; a space inside "[]" at the start of a line makes the
+    /// checkbox straight away. Left alone with a Japanese (or any non-Latin) input mode on.
+    private static func pairBrackets(for e: NSEvent) -> Bool {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isDisjoint(with: [.command, .control, .option]),
+              let typed = e.characters, typed == "[" || typed == "]" || typed == " ",
+              let window = e.window as? IslandPanel, window.isKeyWindow,
+              let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor,
+              !editor.hasMarkedText(),
+              Self.typesLatin(editor.inputContext?.selectedKeyboardInputSource)
+        else { return false }
+        let text = editor.string as NSString
+        let selection = editor.selectedRange()
+        let next = selection.location < text.length ? text.substring(with: NSRange(location: selection.location, length: 1)) : ""
+        switch typed {
+        case "[":
+            editor.insertText("[]", replacementRange: selection)
+            editor.setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+            return true
+        case "]":
+            guard selection.length == 0, next == "]" else { return false }
+            editor.setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+            return true
+        default:
+            // A space between an empty "[]" at the start of a line: that's a checkbox.
+            guard selection.length == 0, next == "]", selection.location >= 1 else { return false }
+            let lineStart = text.lineRange(for: NSRange(location: selection.location, length: 0)).location
+            let before = text.substring(with: NSRange(location: lineStart, length: selection.location - lineStart))
+            guard before.trimmingCharacters(in: CharacterSet(charactersIn: " \t")) == "[" else { return false }
+            // "[] " at the start of a line turns into a checkbox (see `Checklist.autoFormat`).
+            editor.insertText("[] ", replacementRange: NSRange(location: selection.location - 1, length: 2))
+            return true
+        }
+    }
+
+    /// A plain keyboard layout, or an input method's Latin mode (e.g. Japanese 英数 "Roman").
+    private static func typesLatin(_ source: String?) -> Bool {
+        guard let source else { return true }
+        return source.hasPrefix("com.apple.keylayout") || source.hasSuffix(".Roman")
+    }
+
+    private func updateTodoShortcut() {
+        let m = model
+        let wanted = m.isExpanded && m.page == .calendar && m.calendarMode == .todos
+            && !m.isQuickAdding && m.openTodoID == nil && !m.isShowingSettings
+        if wanted, todoHotKey == nil {
+            todoHotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: cmdKey, id: 100 + displayID % 1000) { [weak self] in
+                self?.model.beginQuickAdd()
+            }
+        } else if !wanted, todoHotKey != nil {
+            todoHotKey = nil
+        }
+        // ⌘N on the Calendar page: a new event (or a new to-do in To-dos mode), like the +.
+        // (While quick add is open, ⌘N switches to its notes instead: that's handled by the window.)
+        let wantsNewItem = m.isExpanded && m.page == .calendar && !m.isQuickAdding
+            && m.openTodoID == nil && !m.isShowingSettings
+        if wantsNewItem, newItemHotKey == nil {
+            newItemHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 5000 + displayID % 1000) { [weak self] in
+                self?.model.beginQuickAdd()
+            }
+        } else if !wantsNewItem, newItemHotKey != nil {
+            newItemHotKey = nil
+        }
+        // ⌘N makes a new note while the island is open on the Notes page (taken from other apps
+        // only during that time, like ⌘T on the to-do list).
+        let wantsNewNote = m.isExpanded && m.page == .notes && !m.isShowingSettings
+        if wantsNewNote, newNoteHotKey == nil {
+            newNoteHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 3000 + displayID % 1000) { [weak self] in
+                guard let self else { return }
+                self.model.beginNotesTyping()
+                self.notes.newNote()
+            }
+        } else if !wantsNewNote, newNoteHotKey != nil {
+            newNoteHotKey = nil
+        }
+        // ⌘1–⌘4 switch pages while the island is open (in the order of the dots).
+        let wantsPages = m.isExpanded && !m.isShowingSettings
+        if wantsPages, pageHotKeys.isEmpty {
+            let keys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4]
+            pageHotKeys = keys.enumerated().map { i, key in
+                HotKey(keyCode: key, modifiers: cmdKey, id: 4000 + UInt32(displayID % 100) * 10 + UInt32(i)) { [weak self] in
+                    self?.model.showPage(number: i + 1)
+                }
+            }
+        } else if !wantsPages, !pageHotKeys.isEmpty {
+            pageHotKeys = []
+        }
+        // Esc while an island is open: it closes or steps back even when you only hovered it
+        // open (and it doesn't have the keyboard). Taken from other apps only while it's open.
+        let wantsEscape = m.isExpanded || m.isShowingSettings
+        if wantsEscape, escapeHotKey == nil {
+            escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0, id: 2000 + displayID % 1000) { [weak self] in
+                _ = self?.handleEscape()
+            }
+        } else if !wantsEscape, escapeHotKey != nil {
+            escapeHotKey = nil
+        }
+    }
+
+    /// The app you were in when quick add took the keyboard.
+    private var previousApp: NSRunningApplication?
+
+    /// Takes the keyboard: Ledge becomes the active app (remembering the one you were in) and
+    /// the island's window becomes the key window.
+    private func takeKeyboard() {
+        guard let panel = activePanel ?? panel else { return }
+        if !NSApp.isActive {
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        panel.makeKey()
+    }
+
+    /// Hands the keyboard back to the app you were in, by making that app active again. The
+    /// island's window stays exactly where it is (taking it off screen and back made the whole
+    /// island blink out and in, and cut its closing animation short).
     private func giveBackFocus() {
-        guard let panel, panel.isKeyWindow else { return }
-        panel.orderOut(nil)
-        if !isHidden { panel.orderFrontRegardless() }
+        if let app = previousApp {
+            previousApp = nil
+            if NSApp.isActive { app.activate() }
+        } else if NSApp.isActive {
+            // (After a hand-off this does nothing visible: Notes or Reminders is coming to the front.)
+            NSApp.deactivate()
+        } else if let window = [panel, revealPanel].compactMap({ $0 }).first(where: \.isKeyWindow) {
+            // Rare: the window has the keyboard without Ledge being active. Last resort.
+            window.orderOut(nil)
+            if window === panel ? !isHidden : revealedSpace != nil { window.orderFrontRegardless() }
+        }
     }
 
     func stop() {
@@ -205,12 +399,15 @@ final class IslandController {
         p.allowsKey = { [weak self] in
             MainActor.assumeIsolated {
                 guard let m = self?.model else { return false }
-                return m.isShowingSettings || (m.isExpanded && m.page == .notes)
+                return m.isShowingSettings || (m.isExpanded && (m.page == .notes || m.isQuickAdding || m.openTodoID != nil))
             }
         }
         // Clicking anywhere else ends typing, and the island closes.
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.model.isTyping = false }
+            MainActor.assumeIsolated {
+                if self?.model.isTyping == true { LedgeLog.shared.write("keys: island window lost the keyboard") }
+                self?.model.isTyping = false
+            }
         }
         let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake,
                                   settings: settings, updater: updater, openSettings: openSettings)
@@ -299,25 +496,99 @@ final class IslandController {
             return e
         }) { monitors.append(s) }
         // Esc closes the open island or settings (e.g. when done typing a note).
+        // Quick add's ⌘N (notes) and ⌘return (save) are seen here, before the text fields take them.
         if let k = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
-            guard e.keyCode == 53 else { return e }
+            // Every island has a monitor like this; each one only handles keys typed into its own
+            // window, so islands on other screens never take them.
+            let mine = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let window = e.window else { return false }
+                return window === self.panel || window === self.revealPanel
+            }
+            guard mine else { return e }
+            // Copy, paste, cut, select all, undo and redo while typing. Ledge has no Edit menu (it
+            // runs without a menu bar), so these are passed to the text field directly.
+            let edited = MainActor.assumeIsolated { () -> Bool in
+                guard let action = Self.editAction(for: e), let window = e.window as? IslandPanel, window.isKeyWindow,
+                      let responder = window.firstResponder, responder is NSText else { return false }
+                return responder.tryToPerform(action, with: nil)
+            }
+            if edited { return nil }
+            // ⌥⌘S on the Notes page shows or hides the list of notes (like the Notes app).
+            let sidebarKeys = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if e.keyCode == 1, sidebarKeys == [.command, .option],
+               MainActor.assumeIsolated({ self?.model.page == .notes }) {
+                UserDefaults.standard.set(!Pref.bool(Pref.notesSidebar), forKey: Pref.notesSidebar)
+                return nil
+            }
+            // Tab in a notes box: indents the line by 4 spaces (⇧Tab takes them away), Markdown style.
+            if e.keyCode == 48, MainActor.assumeIsolated({ Self.indentNotes(for: e) }) { return nil }
+            // "[" in a notes box closes itself: "[]" with the cursor in between.
+            if MainActor.assumeIsolated({ Self.pairBrackets(for: e) }) { return nil }
+            let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let command = flags.contains(.command)
+            var key: QuickAddKey?
+            // ⌘N by key position or letter (so it works with any keyboard layout or input mode).
+            if command && (e.keyCode == 45 || e.charactersIgnoringModifiers?.lowercased() == "n") { key = .toggleNotes }
+            else if command && (e.keyCode == 36 || e.keyCode == 76) { key = .save }
+            else if flags.isDisjoint(with: [.command, .control, .option]), e.keyCode != 53,
+                    let chars = e.characters, !chars.isEmpty,
+                    chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }) {
+                // Typed before the text field has the cursor (right after ⌘T): kept, not lost.
+                key = .typeAhead(chars)
+            }
+            guard e.keyCode == 53 || key != nil else { return e }
+            let pressed = key
             let handled = MainActor.assumeIsolated { () -> Bool in
                 guard let self else { return false }
-                if self.model.isShowingSettings { self.model.closeSettings(); return true }
-                guard self.model.isExpanded else { return false }
-                self.model.close()
-                return true
+                let m = self.model
+                if case .typeAhead(let chars)? = pressed {
+                    guard m.isQuickAdding, !m.quickAddIsConfirming, !(e.window?.firstResponder is NSText) else { return false }
+                    m.appendToDraft(chars)
+                    m.quickAddKeys.send(.typeAhead(chars))
+                    return true
+                }
+                if let key = pressed {
+                    guard m.isQuickAdding, !m.quickAddIsConfirming else {
+                        LedgeLog.shared.write("keys: \(key) ignored (quick add \(m.isQuickAdding ? "confirming" : "closed"))")
+                        return false
+                    }
+                    if case .toggleNotes = key {
+                        m.quickAddShowsNotes.toggle()
+                    } else {
+                        m.quickAddKeys.send(key)
+                    }
+                    LedgeLog.shared.write("keys: \(key) sent to quick add (notes \(m.quickAddShowsNotes ? "open" : "closed"))")
+                    return true
+                }
+                return self.handleEscape()
             }
             return handled ? nil : e
         }) { monitors.append(k) }
-        // A click anywhere else closes settings.
+        // A click anywhere else closes settings, or the open island. (What you were typing in
+        // quick add is kept for next time.)
         if let c = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.model.isShowingSettings,
-                      !self.hitRect().contains(NSEvent.mouseLocation) else { return }
-                self.model.closeSettings()
+                guard let self, !self.hitRect().contains(NSEvent.mouseLocation) else { return }
+                if self.model.isShowingSettings { self.model.closeSettings() }
+                else if self.model.isExpanded { self.model.close() }
             }
         }) { monitors.append(c) }
+    }
+
+    /// ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z: the text editing action for a key press, if it is one.
+    nonisolated private static func editAction(for e: NSEvent) -> Selector? {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
+              let key = e.charactersIgnoringModifiers?.lowercased() else { return nil }
+        let shift = flags.contains(.shift)
+        switch key {
+        case "c" where !shift: return #selector(NSText.copy(_:))
+        case "v" where !shift: return #selector(NSText.paste(_:))
+        case "x" where !shift: return #selector(NSText.cut(_:))
+        case "a" where !shift: return #selector(NSText.selectAll(_:))
+        case "z": return shift ? Selector(("redo:")) : Selector(("undo:"))
+        default: return nil
+        }
     }
 
     // MARK: Full-screen reveal
@@ -436,7 +707,7 @@ final class IslandController {
     }
 
     private func handleScroll(_ e: NSEvent) {
-        let open = model.shape == .expanded
+        let open = model.shape.isOpen
         // While typing, the pointer may be anywhere; only swipe when it's over the island.
         guard open || model.hasMedia, hitRect().contains(NSEvent.mouseLocation), e.momentumPhase == [] else { return }
         let phase: SwipeDetector.Phase

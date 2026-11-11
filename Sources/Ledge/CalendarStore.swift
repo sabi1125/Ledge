@@ -15,6 +15,17 @@ struct CalendarItem: Identifiable, Equatable {
     func isOngoing(at now: Date) -> Bool { start <= now && now < end }
 }
 
+/// An event quick add just saved, kept so it can be undone.
+struct AddedEvent: Equatable {
+    var eventID: String
+    var listID: String
+    var draft: QuickEventDraft
+}
+
+struct QuickAddError: Error, Equatable {
+    var message: String
+}
+
 /// Reads upcoming events from the Calendar app's accounts (iCloud, Google, Exchange…).
 @MainActor
 final class CalendarStore: ObservableObject {
@@ -22,11 +33,16 @@ final class CalendarStore: ObservableObject {
 
     @Published private(set) var access: Access = .notAsked
     @Published private(set) var events: [CalendarItem] = []
+    /// The event quick add just saved, softly highlighted in the list for a moment.
+    @Published private(set) var justAddedID: String?
+    /// The color of the calendar quick add saves to (for its preview bar).
+    @Published private(set) var quickAddColor: Color = Color(nsColor: .systemPurple)
 
     private let store = EKEventStore()
     private var observer: NSObjectProtocol?
     private var timer: Timer?
     private var isSample = false
+    private var justAddedTimer: Timer?
 
     init() {
         updateAccess()
@@ -91,6 +107,69 @@ final class CalendarStore: ObservableObject {
                     joinURL: MeetingLink.find(in: [e.url?.absoluteString, e.location, e.notes]))
             }
         if Array(found) != events { events = Array(found) }
+        let color = Color(nsColor: quickAddCalendar?.color ?? .systemPurple)
+        if color != quickAddColor { quickAddColor = color }
+    }
+
+    // MARK: Quick add
+
+    /// Where quick add saves: your iCloud calendar (the one called Personal or Home, if there is one).
+    /// Falls back to the default calendar for new events in the Calendar app.
+    private var quickAddCalendar: EKCalendar? {
+        let writable = store.calendars(for: .event).filter { $0.allowsContentModifications }
+        let iCloud = writable.filter { $0.source?.sourceType == .calDAV && ($0.source?.title ?? "").localizedCaseInsensitiveContains("icloud") }
+        return iCloud.first { ["personal", "home"].contains($0.title.lowercased()) }
+            ?? iCloud.first
+            ?? store.defaultCalendarForNewEvents
+    }
+
+    /// Saves a quick add event to the Calendar app.
+    func add(_ draft: QuickEventDraft, notes: String) -> Result<AddedEvent, QuickAddError> {
+        guard access == .granted else {
+            requestAccess()
+            return .failure(QuickAddError(message: "Allow Calendar access, then press return again"))
+        }
+        guard let target = quickAddCalendar else {
+            return .failure(QuickAddError(message: "No calendar to save to"))
+        }
+        let event = EKEvent(eventStore: store)
+        event.title = draft.title
+        event.startDate = draft.start
+        event.endDate = draft.end
+        event.isAllDay = draft.isAllDay
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { event.notes = trimmed }
+        event.calendar = target
+        do {
+            try store.save(event, span: .thisEvent, commit: true)
+        } catch {
+            LedgeLog.shared.write("calendar: quick add failed: \(error.localizedDescription)")
+            return .failure(QuickAddError(message: "Couldn't save: \(error.localizedDescription)"))
+        }
+        LedgeLog.shared.write("calendar: quick add saved to \(target.title)")
+        let listID = event.calendarItemIdentifier + "\(event.startDate.timeIntervalSince1970)"
+        // Highlighted through the confirmation (1.2 s) and about 2 s back in the list.
+        justAddedID = listID
+        justAddedTimer?.invalidate()
+        justAddedTimer = Timer.scheduledTimer(withTimeInterval: 3.4, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.justAddedID = nil }
+        }
+        refresh()
+        return .success(AddedEvent(eventID: event.eventIdentifier ?? "", listID: listID, draft: draft))
+    }
+
+    /// Removes an event quick add just saved (Undo).
+    func undo(_ added: AddedEvent) {
+        justAddedTimer?.invalidate()
+        justAddedID = nil
+        guard let event = store.event(withIdentifier: added.eventID) else { return }
+        do {
+            try store.remove(event, span: .thisEvent, commit: true)
+            LedgeLog.shared.write("calendar: quick add undone")
+        } catch {
+            LedgeLog.shared.write("calendar: undo failed: \(error.localizedDescription)")
+        }
+        refresh()
     }
 
     /// For snapshots only.

@@ -10,6 +10,7 @@ struct ExpandedView: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var timer: TimerStore
     @ObservedObject var awake: AwakeStore
+    @ObservedObject var todos: RemindersStore = .shared
     @State private var showAwakeMenu = ExpandedView.snapshotMenu
     /// For the snapshot tool only.
     static var snapshotMenu = false
@@ -31,70 +32,143 @@ struct ExpandedView: View {
 
     private var pages: some View {
         VStack(spacing: 0) {
-            TopBar(model: model, awake: awake) { withAnimation(Theme.quick) { showAwakeMenu.toggle() } }
-            // A carousel: every page sits side by side and the row slides to the current one,
-            // so the motion always follows your swipe.
-            GeometryReader { geo in
-                let pages = model.pages
-                let index = CGFloat(pages.firstIndex(of: model.page) ?? 0)
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(pages, id: \.self) { p in
-                        pageView(p)
-                            // Hidden pages stop their clocks (no wasted redraws).
-                            .environment(\.isVisiblePage, p == model.page)
-                            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                            .opacity(p == model.page ? 1 : 0.35)
-                    }
-                }
-                .offset(x: -index * geo.size.width)
-                .animation(Theme.spring, value: model.page)
+            TopBar(model: model, awake: awake, canQuickAdd: canQuickAdd) {
+                withAnimation(Theme.quick) { showAwakeMenu.toggle() }
             }
-            .clipped()
+            // The page area is laid out at the size the island is heading to (not the in-between
+            // size while it grows or shrinks), so nothing inside drifts or reflows: the shape just
+            // reveals or covers it. The island grows around its middle, so a centered page is
+            // already where it will end up. Only the top bar follows the moving edges.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    // The current page only (hidden pages don't run at all). Changing page: a
+                    // crossfade in place. Each page has its own frame, so the one you're leaving
+                    // keeps its size while it fades instead of being squeezed into the new one.
+                    ZStack(alignment: .top) {
+                        pageView(model.page)
+                            .environment(\.isVisiblePage, true)
+                            .frame(width: pageSize.width, height: pageSize.height, alignment: .top)
+                            .id(model.page)
+                            .transition(IslandAnimation.page)
+                    }
+                    .animation(.smooth(duration: 0.3), value: model.page)
+                }
+                .clipped()
         }
+    }
+
+    /// The page area's final size: the open shape being shown, less the top bar.
+    private var pageSize: CGSize {
+        let full = IslandLayout.size(for: model.lastOpenShape, notch: model.notch, style: model.style)
+        let bar = model.style == .notch ? model.notch.height : IslandLayout.floatingTopBar + 2
+        return CGSize(width: full.width, height: max(0, full.height - bar))
+    }
+
+    /// The + shows on the Calendar page once Ledge can read that mode's app.
+    private var canQuickAdd: Bool {
+        guard model.page == .calendar, model.openTodoID == nil else { return false }
+        return model.calendarMode == .events ? calendar.access == .granted : todos.access == .granted
     }
 
     @ViewBuilder private func pageView(_ page: IslandPage) -> some View {
         switch page {
         case .music: PlayerView(model: model)
-        case .calendar: CalendarPage(calendar: calendar)
+        case .calendar: CalendarPage(calendar: calendar, model: model)
         case .timer: TimerPage(timer: timer)
         case .notes: NotesPage(notes: notes, model: model)
         }
     }
 }
 
-/// Sits beside the notch: page name on the left; the stay-awake cup and page dots on the right.
+/// Sits beside the notch: page name on the left; quick add (+), the stay-awake cup and page
+/// dots on the right. While quick add is open, only "New event" shows.
 struct TopBar: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var awake: AwakeStore
+    /// Shows the + (Calendar page, with calendar access).
+    var canQuickAdd = false
     var showAwakeMenu: () -> Void
 
     var body: some View {
+        let adding = model.isQuickAdding
+        let focused = adding || model.openTodoID != nil
+        // Every title stays in place and only fades (the animation is limited to opacity), so when
+        // the page changes while the island resizes, nothing here lags behind the moving edges.
         HStack(spacing: 0) {
-            Label(model.page.title, systemImage: model.page.symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .labelStyle(.titleAndIcon)
-                .contentTransition(.opacity)
-            Spacer(minLength: model.style == .notch ? model.notch.width + 12 : 12)
-            AwakeCup(awake: awake, showMenu: showAwakeMenu)
-                .fixedSize()
-                .padding(.trailing, 8)
-            HStack(spacing: 6) {
+            ZStack(alignment: .leading) {
                 ForEach(model.pages, id: \.self) { p in
-                    Circle()
-                        .fill(p == model.page ? Color.white : Color(white: 0.32))
-                        .frame(width: 6, height: 6)
-                        .padding(3)
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(Theme.spring) { model.show(page: p) } }
-                        .help(p.title)
+                    let shown = !focused && p == model.page
+                    Group {
+                        if p == .calendar {
+                            CalendarModeSwitch(model: model)
+                        } else {
+                            titleLabel(p.title, symbol: p.symbol)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2)) { $0.opacity(shown ? 1 : 0) }
+                    .allowsHitTesting(shown)
                 }
+                titleLabel(leftTitle, symbol: adding ? "plus" : "checklist")
+                    .animation(.easeOut(duration: 0.2)) { $0.opacity(focused ? 1 : 0) }
+                    .allowsHitTesting(false)
             }
+            Spacer(minLength: model.style == .notch ? model.notch.width + 12 : 12)
+            HStack(spacing: 0) {
+                Button { model.beginQuickAdd() } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(Color(white: 0.85))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color(white: 0.13)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(model.calendarMode == .todos ? "Add a to-do (⌘N or ⌘T)" : "Add an event (⌘N, or ⌃⌥E from anywhere)")
+                .padding(.trailing, 8)
+                .animation(.easeOut(duration: 0.2)) { $0.opacity(canQuickAdd ? 1 : 0) }
+                .allowsHitTesting(canQuickAdd)
+                AwakeCup(awake: awake, showMenu: showAwakeMenu)
+                    .fixedSize()
+                    .padding(.trailing, 8)
+                dots
+            }
+            .animation(.easeOut(duration: 0.2)) { $0.opacity(focused ? 0 : 1) }
+            .allowsHitTesting(!focused)
         }
         .padding(.horizontal, 20)
         .frame(height: model.style == .notch ? model.notch.height : IslandLayout.floatingTopBar)
         .padding(.top, model.style == .notch ? 0 : 2)
+    }
+
+    private func titleLabel(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.secondaryText)
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var leftTitle: String {
+        if model.isQuickAdding { return model.quickAddKind == .todos ? "New to-do" : "New event" }
+        if model.openTodoID != nil { return "To-do" }
+        return model.page.title
+    }
+
+    private var dots: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(model.pages.enumerated()), id: \.element) { number, p in
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 6, height: 6)
+                    .animation(.easeOut(duration: 0.2)) { $0.opacity(p == model.page ? 1 : 0.32) }
+                    .padding(3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation(Theme.spring) { model.show(page: p) } }
+                    .help("\(p.title) (⌘\(number + 1))")
+            }
+        }
     }
 }
 
@@ -102,13 +176,37 @@ struct TopBar: View {
 
 struct CalendarPage: View {
     @ObservedObject var calendar: CalendarStore
+    @ObservedObject var model: IslandModel
+    @ObservedObject var todos: RemindersStore = .shared
 
     var body: some View {
+        // Quick add, an opened to-do, or the events or to-dos list. Content only fades in and out.
+        ZStack(alignment: .topLeading) {
+            if model.isQuickAdding {
+                QuickAddView(calendar: calendar, model: model, kind: model.quickAddKind)
+                    .transition(IslandAnimation.swap)
+            } else if let id = model.openTodoID {
+                TodoDetail(todos: todos, model: model, id: id)
+                    .transition(IslandAnimation.swap)
+            } else if model.calendarMode == .todos {
+                TodoListPage(todos: todos, model: model)
+                    .transition(IslandAnimation.swap)
+            } else {
+                list.transition(IslandAnimation.swap)
+            }
+        }
+        .animation(.easeOut(duration: 0.22), value: model.isQuickAdding)
+        .animation(.easeOut(duration: 0.22), value: model.openTodoID)
+        .animation(.easeOut(duration: 0.22), value: model.calendarMode)
+    }
+
+    private var list: some View {
         HStack(alignment: .top, spacing: 18) {
             DateBadge(date: Date())
             Group {
                 switch calendar.access {
-                case .granted: EventList(events: calendar.events)
+                case .granted:
+                    EventList(events: calendar.events, justAddedID: calendar.justAddedID) { model.beginQuickAdd() }
                 case .notAsked:
                     Message(title: "See your upcoming events here",
                             detail: "Ledge reads the calendars you've added to the Calendar app.",
@@ -128,27 +226,37 @@ struct CalendarPage: View {
     }
 }
 
-private struct DateBadge: View {
+struct DateBadge: View {
     var date: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: -2) {
+        VStack(alignment: .center, spacing: -2) {
             Text(date.formatted(.dateTime.weekday(.abbreviated)).uppercased())
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.calendarRed)
+                .contentTransition(.opacity)
             Text(date.formatted(.dateTime.day()))
                 .font(.system(size: 38, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white)
+                .contentTransition(.opacity)
             Text(date.formatted(.dateTime.month(.wide)))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.secondaryText)
+                .contentTransition(.opacity)
         }
-        .frame(width: 70, alignment: .leading)
+        // Centered in its column, and in the page's height.
+        .frame(width: 70)
+        .frame(maxHeight: .infinity)
     }
 }
 
 private struct EventList: View {
     var events: [CalendarItem]
+    /// The event quick add just saved: highlighted, and scrolled into view.
+    var justAddedID: String?
+    var onAdd: () -> Void
+    /// How far (pt) the list goes on below what's showing, for the "+N more" hint.
+    @State private var hiddenBelow: CGFloat = 0
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -159,16 +267,65 @@ private struct EventList: View {
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                     Text("Your calendar is clear for today and tomorrow.")
                         .font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
+                    Button(action: onAdd) {
+                        Label("Add event", systemImage: "plus")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(white: 0.8))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, -7)
+                    .padding(.top, 6)
                 }
                 .padding(.top, 6)
             } else {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(upcoming.prefix(3)) { EventRow(event: $0, now: context.date) }
-                    if upcoming.count > 3 {
-                        Text("+\(upcoming.count - 3) more")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.secondaryText)
-                            .padding(.leading, 12)
+                // Every event, scrollable with two fingers. No scroll bar: "+N more" says there's more.
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(upcoming) { event in
+                                EventRow(event: event, now: context.date, isNew: event.id == justAddedID)
+                                    .id(event.id)
+                            }
+                        }
+                        .padding(.top, 2)
+                        .padding(.bottom, 18) // room to scroll the last row clear of "+N more"
+                    }
+                    .scrollIndicators(.never)
+                    .frame(maxHeight: .infinity)
+                    .onScrollGeometryChange(for: CGFloat.self) { g in
+                        g.contentSize.height - g.containerSize.height - g.contentOffset.y
+                    } action: { _, below in
+                        hiddenBelow = below
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        let more = Int((max(0, hiddenBelow - 18) / 36).rounded(.up))
+                        if more > 0 {
+                            Text("+\(more) more")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.secondaryText)
+                                .padding(.leading, 12)
+                                .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                                .background(Color.black)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.15), value: hiddenBelow > 18)
+                    .onChange(of: justAddedID) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                    // Back from quick add: the list comes back with the new event in view.
+                    .onChange(of: upcoming.contains { $0.id == justAddedID }) { _, there in
+                        guard there, let id = justAddedID else { return }
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                    .onAppear {
+                        guard let id = justAddedID, upcoming.contains(where: { $0.id == id }) else { return }
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
             }
@@ -179,6 +336,7 @@ private struct EventList: View {
 private struct EventRow: View {
     var event: CalendarItem
     var now: Date
+    var isNew = false
 
     var body: some View {
         HStack(spacing: 9) {
@@ -196,8 +354,20 @@ private struct EventRow: View {
             if let url = event.joinURL {
                 Button("Join") { NSWorkspace.shared.open(url) }
                     .buttonStyle(JoinButtonStyle())
+            } else if isNew {
+                Text("Just added")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondaryText)
+                    .transition(.opacity)
             }
         }
+        // A soft light behind a just-added event that fades away.
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(isNew ? 0.08 : 0)))
+        .padding(.horizontal, -8)
+        .padding(.vertical, -2)
+        .animation(.easeOut(duration: 0.6), value: isNew)
     }
 
     private var timeText: String {
@@ -213,7 +383,7 @@ private struct EventRow: View {
     }
 }
 
-private struct Message: View {
+struct Message: View {
     var title: String
     var detail: String
     var button: String
@@ -250,34 +420,288 @@ struct JoinButtonStyle: ButtonStyle {
 struct NotesPage: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var model: IslandModel
-    @FocusState private var focused: Bool
+    @Environment(\.isVisiblePage) private var visible
+    @FocusState private var focus: Field?
+    /// Delete was clicked once; a second click within 3 seconds deletes.
+    @State private var confirmingDelete = false
+    @AppStorage(Pref.notesSidebar) private var showsList = true
+
+    private enum Field { case search, title, body }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $notes.text)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
-                .scrollContentBackground(.hidden)
-                .scrollIndicators(.never)
-                .focused($focused)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 7)
-            if notes.text.isEmpty {
-                Text("Jot something down… it saves automatically")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color(white: 0.42))
-                    .padding(.leading, 12)
-                    .padding(.top, 7)
-                    .allowsHitTesting(false)
+        Group {
+            switch notes.status {
+            case .notAllowed:
+                Message(title: "Notes access is off",
+                        detail: "Allow Ledge to control Notes in Privacy & Security → Automation.",
+                        button: "Open Settings") { notes.openAutomationSettings() }
+            case .failed(let why):
+                Message(title: "Couldn't reach Notes", detail: why, button: "Try again") { notes.refresh() }
+            case .loading, .ready:
+                HStack(alignment: .top, spacing: 14) {
+                    if showsList {
+                        list.frame(width: 168).transition(.opacity)
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1).transition(.opacity)
+                    }
+                    editor
+                }
+                .animation(.easeOut(duration: 0.18), value: showsList)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(white: 0.1)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 18)
         .padding(.top, 4)
         .padding(.bottom, 14)
-        .onChange(of: focused) { _, now in model.isTyping = now }
-        .onChange(of: model.isTyping) { _, now in if !now { focused = false } }
+        .onAppear { if visible { notes.refresh() } }
+        .onChange(of: visible) { _, now in if now { notes.refresh() } }
+        // Only while this page is the one showing: the pages sit side by side, and a hidden one
+        // must never take the cursor or end typing that belongs to quick add.
+        .disabled(!visible)
+        .onChange(of: focus) { _, now in
+            guard visible, !model.isQuickAdding else { return }
+            // Ledge takes the keyboard while you type (so ⌘C/⌘V, Tab and Esc all work).
+            if now != nil { model.beginNotesTyping() } else { model.isTyping = false }
+        }
+        .onChange(of: model.isTyping) { _, now in if !now { focus = nil } }
+        // ⌘N or the pencil: the cursor goes to the new note's title (all selected, so typing replaces it).
+        .onChange(of: notes.newNoteCount) { _, _ in focus = .title }
+        // "[] " becomes a checkbox; return on a list line starts the next one (Tab indents it).
+        .onChange(of: notes.text) { old, new in
+            if let fixed = Checklist.autoFormat(old: old, new: new) { notes.text = fixed }
+        }
         .onDisappear { notes.saveNow() }
+    }
+
+    // MARK: The list of notes (the "Ledge" folder in Notes)
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("NOTES")
+                    .font(.system(size: 9.5, weight: .bold)).tracking(0.6)
+                    .foregroundStyle(Theme.secondaryText)
+                Spacer()
+                Button { notes.newNote() } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(white: 0.85))
+                        .frame(width: 20, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("New note")
+            }
+            .padding(.leading, 8)
+            // Search titles and text.
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                TextField("", text: $notes.query, prompt: Text("Search").foregroundStyle(Color(white: 0.42)))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white)
+                    .focused($focus, equals: .search)
+                if !notes.query.isEmpty {
+                    Button { notes.query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10.5))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondaryText)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.07)))
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(notes.visibleItems) { item in row(item) }
+                    if notes.visibleItems.isEmpty && !notes.query.isEmpty {
+                        Text("No matches")
+                            .font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
+                            .padding(.leading, 8).padding(.top, 4)
+                    }
+                }
+            }
+            .scrollIndicators(.never)
+        }
+    }
+
+    private func row(_ item: NotesStore.Item) -> some View {
+        let selected = item.id == notes.selectedID
+        return Button { notes.select(item.id) } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Color.white : Color(white: 0.85))
+                Text(Self.when(item.modified))
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(selected ? 0.1 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "4:12 PM" today, "Nov 9" before.
+    private static func when(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    // MARK: The open note: title, text, and "Open in Notes"
+
+    @ViewBuilder private var editor: some View {
+        if notes.status == .ready && notes.items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No notes yet").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Text("They're kept in a “Ledge” folder in the Notes app.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
+                Button("New note") { notes.newNote() }
+                    .buttonStyle(AppLinkStyle(fill: Theme.notesYellow, text: .black))
+                    .padding(.top, 6)
+            }
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 10) {
+                    Button { showsList.toggle() } label: {
+                        Image(systemName: "sidebar.left")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(showsList ? Color(white: 0.85) : Theme.secondaryText)
+                            .frame(width: 20, height: 19)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(showsList ? "Hide the list (⌥⌘S)" : "Show the list (⌥⌘S)")
+                    Group {
+                        if model.isSettled {
+                            TextField("", text: $notes.title, prompt: Text("Title").foregroundStyle(Color(white: 0.42)))
+                                .textFieldStyle(.plain)
+                                .foregroundStyle(.white)
+                                .focused($focus, equals: .title)
+                                .onSubmit { focus = .body }
+                        } else {
+                            // While the island is still moving: plain text (see `IslandModel.isSettled`).
+                            Text(notes.title.isEmpty ? "Title" : notes.title)
+                                .foregroundStyle(notes.title.isEmpty ? Color(white: 0.42) : .white)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    deleteButton
+                    OpenInAppButton(color: Theme.notesYellow, help: "Open in Notes") {
+                        notes.openInNotes()
+                        model.closeForHandOff()
+                    }
+                }
+                ZStack(alignment: .topLeading) {
+                    if model.isSettled {
+                        TextEditor(text: $notes.text)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white)
+                            .scrollContentBackground(.hidden)
+                            .scrollIndicators(.never)
+                            .focused($focus, equals: .body)
+                            .padding(.leading, -5)
+                    } else {
+                        // While the island is still moving: plain text (see `IslandModel.isSettled`).
+                        Text(notes.text)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    if notes.text.isEmpty {
+                        Text("Jot something down… type [] for a checkbox")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(white: 0.42))
+                            .allowsHitTesting(false)
+                    }
+                }
+                // No box: the note sits right on the island's black, with just the blinking cursor.
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+extension NotesPage {
+    /// Trash, then a red "Delete?" for 3 seconds; a second click deletes (to Recently Deleted).
+    @ViewBuilder var deleteButton: some View {
+        if confirmingDelete {
+            Button {
+                confirmingDelete = false
+                notes.deleteSelected()
+            } label: {
+                Text("Delete?")
+            }
+            .buttonStyle(AppLinkStyle(fill: Theme.calendarRed, text: .white))
+            .help("Click again to delete. It goes to Recently Deleted in Notes")
+            .transition(.opacity)
+        } else {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { confirmingDelete = true }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    withAnimation(.easeOut(duration: 0.15)) { confirmingDelete = false }
+                }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 20, height: 19)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Delete this note")
+        }
+    }
+}
+
+/// A small square with an arrow, in the other app's color: opens the note or to-do there.
+/// Quiet, but the color makes it easy to spot. The name shows on hover.
+struct OpenInAppButton: View {
+    var color: Color
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up.forward")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 20, height: 19)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(color.opacity(0.16)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+/// A small, bright pill ("New note").
+struct AppLinkStyle: ButtonStyle {
+    var fill: Color
+    var text: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(text)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 9)
+            .frame(height: 19)
+            .background(Capsule().fill(fill.opacity(configuration.isPressed ? 0.75 : 1)))
     }
 }
 
@@ -410,6 +834,7 @@ struct TimerPage: View {
 /// Timer / Pomodoro switch.
 struct ModeSwitch: View {
     @Binding var mode: TimerStore.Mode
+    @Namespace private var pill
 
     var body: some View {
         HStack(spacing: 2) {
@@ -426,9 +851,14 @@ struct ModeSwitch: View {
             .foregroundStyle(mode == value ? Color.white : Theme.secondaryText)
             .padding(.horizontal, 11)
             .frame(height: 22)
-            .background(Capsule().fill(mode == value ? Color(white: 0.24) : .clear))
+            .background {
+                // One highlight that slides to the chosen side.
+                if mode == value {
+                    Capsule().fill(Color(white: 0.24)).matchedGeometryEffect(id: "pill", in: pill)
+                }
+            }
             .contentShape(Capsule())
-            .onTapGesture { withAnimation(Theme.quick) { mode = value } }
+            .onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { mode = value } }
     }
 }
 

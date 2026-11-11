@@ -8,7 +8,12 @@ public enum IslandShape: Equatable, Sendable {
     case compact    // music playing
     case hud        // volume / brightness / battery
     case expanded   // open: Music, Calendar, Timer, Notes
+    case expandedTall // open, bigger, for notes: a to-do's notes, quick add notes
+    case expandedNotes // open, the Notes page: as wide as expandedTall, a bit taller
     case settings   // Ledge's settings, opened from Spotlight or a right-click
+
+    /// Open (normal or tall).
+    public var isOpen: Bool { self == .expanded || self == .expandedTall || self == .expandedNotes }
 }
 
 /// Where the island lives.
@@ -50,6 +55,11 @@ public enum IslandLayout {
     public static let hudBody: CGFloat = 38
     /// Height of the open island's content area (below the notch or the top bar).
     public static let expandedBody: CGFloat = 140
+    /// The bigger open island, for reading or writing notes: taller and a little wider.
+    public static let expandedTallBody: CGFloat = 300
+    public static let expandedTallWidth: CGFloat = 680
+    /// The Notes page: 15% taller than the other notes views.
+    public static let expandedNotesBody: CGFloat = 345
     public static let expandedMinWidth: CGFloat = 530
     /// The settings panel: wider than the open island, a sidebar and one section.
     public static let settingsWidth: CGFloat = 640
@@ -91,6 +101,12 @@ public enum IslandLayout {
             case .expanded:
                 return CGSize(width: max(notch.width + 230, expandedMinWidth),
                               height: notch.height + expandedBody)
+            case .expandedTall:
+                return CGSize(width: max(notch.width + 380, expandedTallWidth),
+                              height: notch.height + expandedTallBody)
+            case .expandedNotes:
+                return CGSize(width: max(notch.width + 380, expandedTallWidth),
+                              height: notch.height + expandedNotesBody)
             case .settings:
                 return CGSize(width: settingsWidth, height: notch.height + settingsBody)
             }
@@ -102,6 +118,8 @@ public enum IslandLayout {
             case .compact: return CGSize(width: compactWidth ?? (280 + (h - 18) * 3), height: h)
             case .hud: return CGSize(width: 230 + (h - 18) * 2, height: h)
             case .expanded: return CGSize(width: expandedMinWidth, height: floatingTopBar + expandedBody)
+            case .expandedTall: return CGSize(width: expandedTallWidth, height: floatingTopBar + expandedTallBody)
+            case .expandedNotes: return CGSize(width: expandedTallWidth, height: floatingTopBar + expandedNotesBody)
             case .settings: return CGSize(width: settingsWidth, height: floatingTopBar + settingsBody)
             }
         }
@@ -115,10 +133,10 @@ public enum IslandLayout {
             case .idle: return 10
             case .hover, .compact: return notch.height * 0.42
             case .hud: return 24
-            case .expanded, .settings: return 30
+            case .expanded, .expandedTall, .expandedNotes, .settings: return 30
             }
         case .floating:
-            return shape == .expanded || shape == .settings ? 26 : size(for: shape, notch: notch, style: style).height / 2
+            return shape.isOpen || shape == .settings ? 26 : size(for: shape, notch: notch, style: style).height / 2
         }
     }
 
@@ -131,7 +149,7 @@ public enum IslandLayout {
     /// like the real notch's shoulders. The floating pill has none.
     public static func shoulderRadius(for shape: IslandShape, style: IslandStyle = .notch) -> CGFloat {
         guard style == .notch else { return 0 }
-        return shape == .expanded || shape == .settings ? 12 : 6
+        return shape.isOpen || shape == .settings ? 12 : 6
     }
 
     /// Space above the island inside its window.
@@ -142,7 +160,7 @@ public enum IslandLayout {
     /// The window that hosts the island never changes size; it's big enough
     /// for the largest shape plus its shadow.
     public static func panelSize(notch: NotchMetrics, style: IslandStyle = .notch) -> CGSize {
-        let biggest = [IslandShape.expanded, .hud, .settings].map { size(for: $0, notch: notch, style: style) }
+        let biggest = [IslandShape.expanded, .expandedTall, .expandedNotes, .hud, .settings].map { size(for: $0, notch: notch, style: style) }
         return CGSize(width: biggest.map(\.width).max()! + 120,
                       height: biggest.map(\.height).max()! + topGap(style: style) + 50)
     }

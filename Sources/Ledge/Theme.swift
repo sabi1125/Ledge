@@ -11,6 +11,8 @@ enum Theme {
     static let quick = Animation.spring(response: 0.3, dampingFraction: 0.86)
     /// Indicators popping down out of the notch: quick, and stopping exactly at their size.
     static let pop = Animation.spring(response: 0.32, dampingFraction: 1, blendDuration: 0)
+    /// The open island changing size (e.g. into Notes): one smooth move, no bounce, no overshoot.
+    static let resize = Animation.spring(response: 0.38, dampingFraction: 1)
     /// The level bar following key presses: smooth, no overshoot.
     static let level = Animation.smooth(duration: 0.16)
 
@@ -25,6 +27,9 @@ enum Theme {
     static let breakGreen = Color(red: 0.37, green: 0.83, blue: 0.54)
     static let awakeOrange = Color(red: 1.0, green: 0.70, blue: 0.28)
     static let joinBlue = Color(red: 0.2, green: 0.47, blue: 0.96)
+    /// The Notes and Reminders app colors, for the "Open in…" pills.
+    static let notesYellow = Color(red: 1.0, green: 0.80, blue: 0.22)
+    static let remindersBlue = Color(red: 0.24, green: 0.58, blue: 1.0)
 }
 
 enum ArtworkColor {
@@ -107,7 +112,7 @@ enum IslandAnimation: String, CaseIterable, Identifiable {
                                     : .spring(response: 0.34, dampingFraction: 1)
         case .drop: return growing ? .spring(response: 0.36, dampingFraction: 1)
                                    : .spring(response: 0.3, dampingFraction: 1).delay(0.12)
-        case .stretch: return growing ? .spring(response: 0.36, dampingFraction: 1).delay(0.14)
+        case .stretch: return growing ? .spring(response: 0.36, dampingFraction: 1).delay(0.1)
                                       : .spring(response: 0.26, dampingFraction: 1)
         case .calm: return growing ? .smooth(duration: 0.28) : .smooth(duration: 0.24)
         }
@@ -116,26 +121,50 @@ enum IslandAnimation: String, CaseIterable, Identifiable {
     /// For everything else that changes with the shape (corner radii and so on).
     var shape: Animation { height(growing: true) }
 
-    /// How the content inside appears and disappears. It never scales.
+    /// How the content inside appears and disappears. It never scales. It starts coming in while
+    /// the shape is still opening (about a third of the way), so the island is never an empty black
+    /// box, and it's fully there just as the shape settles.
     var content: AnyTransition {
-        let out = AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+        let out = AnyTransition.modifier(active: BlurFade(radius: 3, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+            .animation(.easeOut(duration: 0.12))
+        func soft(_ blur: CGFloat, _ animation: Animation) -> AnyTransition {
+            .modifier(active: BlurFade(radius: blur, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                .animation(animation)
+        }
         switch self {
         case .morph:
-            return .asymmetric(
-                insertion: .modifier(active: BlurFade(radius: 8, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
-                    .animation(.easeOut(duration: 0.3).delay(0.15)),
-                removal: .modifier(active: BlurFade(radius: 6, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
-                    .animation(.easeOut(duration: 0.15)))
+            return .asymmetric(insertion: soft(10, .easeOut(duration: 0.32).delay(0.08)), removal: out)
         case .drop:
             return .asymmetric(
-                insertion: AnyTransition.offset(y: -12).combined(with: .opacity)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.2)),
+                insertion: AnyTransition.offset(y: -8)
+                    .combined(with: .modifier(active: BlurFade(radius: 3, opacity: 0), identity: BlurFade(radius: 0, opacity: 1)))
+                    .animation(.spring(response: 0.36, dampingFraction: 0.92).delay(0.1)),
                 removal: out)
         case .stretch:
-            return .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.25).delay(0.3)), removal: out)
+            // Widens first, then drops: the content arrives with the drop.
+            return .asymmetric(insertion: soft(4, .easeOut(duration: 0.24).delay(0.12)), removal: out)
         case .calm:
-            return .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.22).delay(0.1)), removal: out)
+            return .asymmetric(insertion: soft(4, .easeOut(duration: 0.22).delay(0.05)), removal: out)
         }
+    }
+
+    /// Swapping one view for another inside the open island (quick add, a to-do, events and to-dos).
+    static var swap: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(active: BlurFade(radius: 3, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                .animation(.easeOut(duration: 0.22).delay(0.04)),
+            removal: .modifier(active: BlurFade(radius: 3, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                .animation(.easeOut(duration: 0.12)))
+    }
+
+    /// Moving between pages: a crossfade in place with a soft focus. Nothing slides, so the content
+    /// stays still while the island changes size around it.
+    static var page: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(active: BlurFade(radius: 4, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                .animation(.easeOut(duration: 0.24).delay(0.06)),
+            removal: .modifier(active: BlurFade(radius: 4, opacity: 0), identity: BlurFade(radius: 0, opacity: 1))
+                .animation(.easeOut(duration: 0.14)))
     }
 }
 

@@ -82,7 +82,12 @@ final class IslandManager {
                 model.onCommand = { [weak self] in self?.media.send($0) }
                 model.timerTitle = timer.live?.title ?? "Timer"
                 model.timerActive = timer.live != nil
-                model.onOpen = { Haptics.openTick() }
+                // Only one island is open at a time: opening one closes the others (otherwise an
+                // island left open on another screen could take your keys).
+                model.onOpen = { [weak self, weak model] in
+                    Haptics.openTick()
+                    if let model { self?.closeOthers(than: model) }
+                }
                 let controller = IslandController(displayID: id, model: model, calendar: calendar, notes: notes,
                                                   timer: timer, awake: awake, settings: settings, updater: updater,
                                                   openSettings: openSettings)
@@ -132,6 +137,16 @@ final class IslandManager {
 
     /// Debug only: plays a style's open and close on the notch while recording it.
     func debugRecord(style: String, to dir: String) {
+        // "scene:<name>" or "scene:<name>@pill" plays one transition (see `debugScene`).
+        if style.hasPrefix("scene:") {
+            var name = String(style.dropFirst(6))
+            let pill = name.hasSuffix("@pill")
+            if pill { name = String(name.dropLast(5)) }
+            let want: IslandStyle = pill ? .floating : .notch
+            guard let c = controllers.values.first(where: { $0.model.style == want }) else { return }
+            debugScene(name, on: c, to: dir)
+            return
+        }
         guard let c = controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return }
         if style == "hud" {
             // A volume pop, as if the key was pressed.
@@ -144,6 +159,55 @@ final class IslandManager {
         c.model.previewAnimation()
     }
 
+    /// Debug only: sets the island up, then records one transition at 40 frames a second.
+    /// open, close, page, tonotes, fromnotes, quickadd, quicknotes, settings, settingsclose, hud, compacthud
+    private func debugScene(_ name: String, on c: IslandController, to dir: String) {
+        let m = c.model
+        IslandRootView.logMoves = true
+        func record(_ seconds: TimeInterval = 1.4, _ action: @escaping () -> Void) {
+            c.recordFrames(to: dir, seconds: seconds, every: 0.025)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: action)
+        }
+        func reset(page: IslandPage?, then: @escaping () -> Void) {
+            m.closeSettings()
+            m.close()
+            if let page { m.debugSetPage(page) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: then)
+        }
+        func opened(page: IslandPage, then: @escaping () -> Void) {
+            reset(page: page) {
+                m.debugOpen()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: then)
+            }
+        }
+        switch name {
+        case "open": reset(page: .calendar) { record { m.debugOpen() } }
+        case "close": opened(page: .calendar) { record { m.close() } }
+        case "opennotes": reset(page: .notes) { record { m.debugOpen() } }
+        case "closenotes": opened(page: .notes) { record { m.close() } }
+        case "page": opened(page: .calendar) { record { m.show(page: .timer) } }
+        case "tonotes": opened(page: .timer) { record { m.show(page: .notes) } }
+        case "fromnotes": opened(page: .notes) { record { m.show(page: .timer) } }
+        case "quickadd": opened(page: .calendar) { record { m.calendarMode = .events; m.beginQuickAdd() } }
+        case "quickaddend": opened(page: .calendar) {
+            m.calendarMode = .events; m.beginQuickAdd()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { record { m.cancelQuickAdd() } }
+        }
+        case "quicknotes": opened(page: .calendar) {
+            m.calendarMode = .events; m.beginQuickAdd()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { record { m.quickAddShowsNotes = true } }
+        }
+        case "mode": opened(page: .calendar) { record { m.calendarMode = m.calendarMode == .events ? .todos : .events } }
+        case "settings": reset(page: nil) { record(1.6) { m.openSettings() } }
+        case "settingsclose": reset(page: nil) {
+            m.openSettings()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { record { m.closeSettings() } }
+        }
+        case "hud": reset(page: nil) { record(2.2) { m.show(.volume(level: 0.62, muted: false)) } }
+        default: break
+        }
+    }
+
     /// Plays the open-and-close animation on the MacBook's notch (or the first island).
     func previewAnimation() {
         (controllers.values.first { $0.model.style == .notch } ?? controllers.values.first)?.model.previewAnimation()
@@ -153,6 +217,23 @@ final class IslandManager {
     /// Alerts you shouldn't miss go to every screen (and show even over full-screen apps).
     func alertEverywhere(_ hud: HUD) {
         for c in controllers.values { c.alert(hud) }
+    }
+
+    private func closeOthers(than model: IslandModel) {
+        for c in controllers.values where c.model !== model {
+            if c.model.isShowingSettings { c.model.closeSettings() }
+            if c.model.isExpanded { c.model.close() }
+        }
+    }
+
+    /// ⌃⌥E / ⌃⌥T: quick add on the island you're using (under the pointer, else the notch).
+    func quickAdd(_ kind: CalendarMode) {
+        let p = NSEvent.mouseLocation
+        let target = controllers.values.first { $0.contains(point: p) && !$0.isSuppressed }
+            ?? controllers.values.first { $0.model.style == .notch }
+            ?? controllers.values.first
+        for c in controllers.values where c !== target && c.model.isExpanded { c.model.close() }
+        target?.model.openQuickAdd(kind)
     }
 
     func islandUnderPointer() -> IslandModel? {

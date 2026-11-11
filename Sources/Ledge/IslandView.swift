@@ -60,6 +60,14 @@ struct IslandRootView: View {
     @State private var topRadius: CGFloat = 0
     @State private var shoulder: CGFloat = 6
     @State private var didAppear = false
+    /// True after the island changed between two open sizes (e.g. into Notes): the open content's
+    /// frame then follows the black shape exactly. Opening and closing keep the content at its full
+    /// size instead, and the shape reveals or covers it. Width and height each switch inside their
+    /// own animation, so the content moves on the same curve as each edge of the shape.
+    /// When the shape last started moving (to tell a quick retarget from a fresh move).
+    @State private var lastMove = Date.distantPast
+    @State private var tracksWidth = false
+    @State private var tracksHeight = false
 
     private var target: IslandGeometry {
         let shape = model.shape, style = model.style
@@ -67,7 +75,8 @@ struct IslandRootView: View {
         return IslandGeometry(width: size.width, height: size.height,
                               bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
                               topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style),
-                              shoulder: IslandLayout.shoulderRadius(for: shape, style: style))
+                              shoulder: IslandLayout.shoulderRadius(for: shape, style: style),
+                              isOpen: shape.isOpen)
     }
 
     var body: some View {
@@ -92,10 +101,12 @@ struct IslandRootView: View {
             // the black shape opens and closes over it like a window, so nothing squishes.
             content
         }
-        .frame(width: w + s * 2, height: h)
+        // Top-aligned: while the shape is smaller than the content (opening, closing, resizing),
+        // the content stays pinned to the top instead of being centered and drifting.
+        .frame(width: w + s * 2, height: h, alignment: .top)
         .clipShape(outline)
         .contentShape(outline)
-        .shadow(color: .black.opacity(shape == .expanded || shape == .settings ? 0.5 : 0), radius: 16, y: 6)
+        .shadow(color: .black.opacity(shape.isOpen || shape == .settings ? 0.5 : 0), radius: 16, y: 6)
         .onTapGesture { model.clicked() }
         .contextMenu {
             Button("Ledge Settings…", action: openSettings)
@@ -117,25 +128,51 @@ struct IslandRootView: View {
             didAppear = true
             return
         }
+        if IslandRootView.logMoves {
+            LedgeLog.shared.write("move: \(model.style == .notch ? "notch" : "pill") \(Int(old.width))x\(Int(old.height)) -> \(Int(new.width))x\(Int(new.height)) shape \(model.shape)")
+        }
         let growing = new.width * new.height >= old.width * old.height
         let style = IslandAnimation.current
         let isHUD = model.shape == .hud || (!growing && old.height > new.height && model.hud != nil)
         // Closing: let the content fade out first, so the shape only ever closes over empty black.
-        let lead = growing ? 0 : 0.09
-        let widthAnimation = (isHUD ? Theme.pop : style.width(growing: growing)).delay(lead)
-        let heightAnimation = (isHUD ? Theme.pop : style.height(growing: growing)).delay(lead)
+        let resize = old.isOpen && new.isOpen
+        let lead = growing || resize ? 0 : 0.09
+        // Between two open sizes (into Notes, quick add notes, a to-do): one motion, width and height
+        // together, whatever the style. The styles' two-step moves (sideways, then down) are for
+        // coming out of and going back into the notch; between open sizes they look like the island
+        // shrinks one way and then grows the other.
+        var widthAnimation = resize ? Theme.resize : (isHUD ? Theme.pop : style.width(growing: growing)).delay(lead)
+        var heightAnimation = resize ? Theme.resize : (isHUD ? Theme.pop : style.height(growing: growing)).delay(lead)
+        // A small change of target while the island is still moving (e.g. closing heads for the
+        // hover bump, then the pointer turns out to be elsewhere and it settles to the notch size).
+        // Springs keep their speed when retargeted: a fast-closing island would shoot through the
+        // new target, vanish for a moment and bounce back. An ease adds the small change on top of
+        // the motion already running instead, so it lands cleanly.
+        let now = Date()
+        let inFlight = now.timeIntervalSince(lastMove) < 0.6
+        let small = abs(new.width - old.width) <= 60 && abs(new.height - old.height) <= 16
+        if inFlight && small && !resize {
+            widthAnimation = .easeOut(duration: 0.22)
+            heightAnimation = .easeOut(duration: 0.22)
+        }
+        lastMove = now
         // The top-corner shoulders belong to the width (so a narrowing island is never wider
         // than the notch); the bottom corners belong to the height.
         withAnimation(widthAnimation) {
             width = new.width
             shoulder = new.shoulder
+            tracksWidth = resize
         }
         withAnimation(heightAnimation) {
             height = new.height
             bottomRadius = new.bottomRadius
             topRadius = new.topRadius
+            tracksHeight = resize
         }
     }
+
+    /// Debug only: writes every size change to the log (set by the animation recorder).
+    static var logMoves = false
 
     /// Content only fades in and out (never scales), in the chosen animation style.
     private static var fade: AnyTransition { IslandAnimation.current.content }
@@ -153,9 +190,14 @@ struct IslandRootView: View {
                     .fixedFrame(for: .hud, model: model)
                     .transition(Self.fade)
             }
-        case .expanded:
+        case .expanded, .expandedTall, .expandedNotes:
+            let full = IslandLayout.size(for: model.lastOpenShape, notch: model.notch, style: model.style)
+            // Between two open sizes the content's frame is the shape's own animated size, so the
+            // top bar and edges move in lockstep with the black shape. Otherwise it keeps its full
+            // size and the shape opens and closes over it.
             ExpandedView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake)
-                .fixedFrame(for: .expanded, model: model)
+                .frame(width: tracksWidth && didAppear ? width : full.width, alignment: .top)
+                .frame(height: tracksHeight && didAppear ? height : full.height, alignment: .top)
                 .transition(Self.fade)
         case .settings:
             SettingsPanel(model: model, state: settings, updater: updater)
@@ -182,6 +224,7 @@ struct IslandGeometry: Equatable {
     var bottomRadius: CGFloat
     var topRadius: CGFloat
     var shoulder: CGFloat
+    var isOpen = false
 }
 
 // MARK: - Compact (music playing)
@@ -657,3 +700,4 @@ extension EnvironmentValues {
         set { self[IsVisiblePageKey.self] = newValue }
     }
 }
+

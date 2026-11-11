@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let keys = MediaKeyInterceptor()
     private let settingsState = SettingsState()
     private var revealHotKey: HotKey?
+    private var quickEventHotKey: HotKey?
+    private var quickTodoHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.registerDefaults()
@@ -132,6 +134,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hider.reveal()
         }
 
+        // ⌃⌥E: new event, ⌃⌥T: new to-do, from anywhere (no need to click the +).
+        quickEventHotKey = HotKey(keyCode: kVK_ANSI_E, modifiers: controlKey | optionKey, id: 2) { [weak self] in
+            self?.islands.quickAdd(.events)
+        }
+        quickTodoHotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey, id: 3) { [weak self] in
+            self?.islands.quickAdd(.todos)
+        }
+
         if !Pref.bool(Pref.didFirstLaunch), !LoginItem.isEnabled {
             LoginItem.set(true) // start at login by default
             settingsState.launchAtLogin = LoginItem.isEnabled
@@ -144,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        notes.saveNow()
+        notes.saveNow(wait: true)
         media.stop()
         hider.stop()
     }

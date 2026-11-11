@@ -22,10 +22,16 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Ledge keeps its notes in the Notes app, and opens notes and to-dos there when you ask.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Ledge shows your upcoming events in the notch.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Ledge shows your upcoming events in the notch.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Ledge shows your to-dos in the notch and adds new ones to Reminders.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Ledge shows your to-dos in the notch and adds new ones to Reminders.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

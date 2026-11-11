@@ -24,6 +24,8 @@ enum Pref {
     static let pomoLong = "pomoLongMinutes"
     static let pomoSessions = "pomoSessions"
     static let pomoAutoStart = "pomoAutoStart"
+    /// The Notes page shows its list of notes (⌥⌘S or the sidebar button hides it).
+    static let notesSidebar = "notesSidebar"
 
     /// The island pages switched on in settings (Music uses "Show what's playing").
     static var enabledPages: Set<IslandPage> {
@@ -56,6 +58,7 @@ enum Pref {
             pomoLong: 15,
             pomoSessions: 4,
             pomoAutoStart: true,
+            notesSidebar: true,
         ])
     }
 
