@@ -9,6 +9,10 @@ public struct QuickEventDraft: Equatable, Sendable {
     public var isAllDay: Bool
     /// False when no day or time was found. The draft then falls back to an all-day event today.
     public var foundDate: Bool
+    /// How it repeats ("every mon wed fri until dec 2029"), if it does.
+    public var repeatRule: RepeatRule?
+    /// A day was written ("fri", "Dec 20", "in 3 days"), not just a time.
+    public var dayWasGiven = false
 
     public init(title: String, start: Date, end: Date, isAllDay: Bool, foundDate: Bool) {
         self.title = title
@@ -28,6 +32,41 @@ public struct QuickEventDraft: Equatable, Sendable {
 public enum QuickEventParser {
     public static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current,
                              defaultDuration: TimeInterval = 3600) -> QuickEventDraft {
+        // "every mon wed fri until dec 2029": the repeat words come out first, the rest reads as usual.
+        guard let found = RepeatReader.extract(text, calendar: calendar) else {
+            return parseOnce(text, now: now, calendar: calendar, defaultDuration: defaultDuration)
+        }
+        var draft = parseOnce(found.text, now: now, calendar: calendar, defaultDuration: defaultDuration)
+        var rule = found.rule
+        let today = calendar.startOfDay(for: now)
+        // The first one is the first day that fits: "every weekend" starts on a Saturday or Sunday.
+        let from = draft.dayWasGiven ? calendar.startOfDay(for: draft.start) : today
+        func fits(_ day: Date) -> Bool {
+            switch rule.frequency {
+            case .weekly: return rule.weekdays.isEmpty || rule.weekdays.contains(calendar.component(.weekday, from: day))
+            case .monthly: return rule.monthDay.map { calendar.component(.day, from: day) == $0 } ?? true
+            default: return true
+            }
+        }
+        let timeOfDay = draft.start.timeIntervalSince(calendar.startOfDay(for: draft.start))
+        let length = draft.end.timeIntervalSince(draft.start)
+        for offset in 0..<400 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: from), fits(day) else { continue }
+            let start = draft.isAllDay ? day : day.addingTimeInterval(timeOfDay)
+            // Not one that's already over today.
+            if !draft.isAllDay, start <= now { continue }
+            draft.start = start
+            draft.end = start.addingTimeInterval(length)
+            break
+        }
+        if let until = rule.until, until < calendar.startOfDay(for: draft.start) { rule.until = nil }
+        draft.repeatRule = rule
+        draft.foundDate = true
+        return draft
+    }
+
+    private static func parseOnce(_ text: String, now: Date, calendar: Calendar,
+                                  defaultDuration: TimeInterval) -> QuickEventDraft {
         let ns = text as NSString
         var used: [NSRange] = []
         func isFree(_ r: NSRange) -> Bool { !used.contains { NSIntersectionRange($0, r).length > 0 } }
@@ -44,15 +83,19 @@ public enum QuickEventParser {
             // To the minute (seconds would show as an odd time).
             let raw = now.addingTimeInterval(found.seconds)
             let start = Date(timeIntervalSinceReferenceDate: (raw.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60)
-            return QuickEventDraft(title: cleanTitle(ns, removing: pieces), start: start, end: start.addingTimeInterval(length),
-                                   isAllDay: false, foundDate: true)
+            var d = QuickEventDraft(title: cleanTitle(ns, removing: pieces), start: start, end: start.addingTimeInterval(length),
+                                    isAllDay: false, foundDate: true)
+            d.dayWasGiven = true
+            return d
         }
 
         // From one date to another: "Jan 20 2027 to Jan 25 2027", "Dec 20-23", "12/20 - 12/23",
         // "Dec 20 9am to Dec 21 5pm". Read as a whole first, so its two halves aren't taken apart.
         if let found = dateRange(in: text, calendar: calendar) {
             let title = cleanTitle(ns, removing: [found.range])
-            return QuickEventDraft(title: title, start: found.start, end: found.end, isAllDay: found.isAllDay, foundDate: true)
+            var d = QuickEventDraft(title: title, start: found.start, end: found.end, isAllDay: found.isAllDay, foundDate: true)
+            d.dayWasGiven = true
+            return d
         }
 
         // Times of day, as minutes after midnight.
@@ -142,15 +185,21 @@ public enum QuickEventParser {
                 end = start.addingTimeInterval(duration ?? defaultDuration)
             }
             if end <= start { end = start.addingTimeInterval(defaultDuration) }
-            return QuickEventDraft(title: title, start: start, end: end, isAllDay: false, foundDate: true)
+            var d = QuickEventDraft(title: title, start: start, end: end, isAllDay: false, foundDate: true)
+            d.dayWasGiven = day != nil
+            return d
         }
         if let day {
             if isTonight {
                 let start = calendar.date(byAdding: .hour, value: 20, to: day) ?? day
-                return QuickEventDraft(title: title, start: start, end: start.addingTimeInterval(duration ?? defaultDuration),
-                                       isAllDay: false, foundDate: true)
+                var d = QuickEventDraft(title: title, start: start, end: start.addingTimeInterval(duration ?? defaultDuration),
+                                        isAllDay: false, foundDate: true)
+                d.dayWasGiven = true
+                return d
             }
-            return QuickEventDraft(title: title, start: day, end: oneDay(day), isAllDay: true, foundDate: true)
+            var d = QuickEventDraft(title: title, start: day, end: oneDay(day), isAllDay: true, foundDate: true)
+            d.dayWasGiven = true
+            return d
         }
         return QuickEventDraft(title: title, start: today, end: oneDay(today), isAllDay: true, foundDate: false)
     }
@@ -186,6 +235,8 @@ public enum QuickEventParser {
         static let fromNow = make(#"(?<![\w])(\d+(?:\.\d+)?|an?|half\s+an?)\s*(hours?|hrs?|h|minutes?|mins?|m)\s+from\s+now(?![\w])"#)
         /// "remind me to", "don't forget to" at the start: not part of the title.
         static let reminderPrefix = make(#"^\s*(?:please\s+)?(?:remind\s+me(?:\s+to)?|don'?t\s+forget(?:\s+to)?|remember\s+to)\s+"#)
+        /// The join between the two ends of a date range: "to", "until", or a dash.
+        static let rangeJoin = make(#"\s(?:to|until|till|through|thru)\s|\d\s*[-–—]\s*\w"#)
         /// next week
         static let nextWeek = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?next\s+week(?![\w])"#)
         /// A time of day inside a date range ("Dec 20 9am to Dec 21 5pm").
@@ -222,8 +273,15 @@ public enum QuickEventParser {
         guard let h1 = group(m, 1, ns).flatMap({ Int($0) }), let h2 = group(m, 4, ns).flatMap({ Int($0) }) else { return nil }
         let m1 = group(m, 2, ns).flatMap({ Int($0) }), m2 = group(m, 5, ns).flatMap({ Int($0) })
         let mer1 = group(m, 3, ns), mer2 = group(m, 6, ns)
-        // "2-3 chairs" is not a time: it needs am/pm or a colon somewhere.
-        guard mer1 != nil || mer2 != nil || m1 != nil || m2 != nil else { return nil }
+        // "2-3 chairs" is not a time: it needs am/pm or a colon somewhere, or "from" before it.
+        guard mer1 != nil || mer2 != nil || m1 != nil || m2 != nil else {
+            // "from 5 to 8": hours, the way you'd say them (1–7 is the afternoon or evening).
+            guard ns.substring(with: m.range).lowercased().hasPrefix("from"), h1 < 24, h2 < 24 else { return nil }
+            let start = ((1...7).contains(h1) ? h1 + 12 : h1) * 60
+            var end = ((1...7).contains(h2) ? h2 + 12 : h2) * 60
+            if end <= start && end + 12 * 60 > start { end += 12 * 60 } // "from 11 to 1"
+            return (start, end % (24 * 60))
+        }
         let end: Int
         if let mer = mer2 ?? mer1 {
             guard let e = minutes(hour: h2, minute: m2 ?? 0, meridiem: mer) else { return nil }
@@ -331,8 +389,10 @@ public enum QuickEventParser {
             guard var date = m.date, m.duration > 0 else { continue }
             let piece = ns.substring(with: m.range)
             let whole = NSRange(location: 0, length: (piece as NSString).length)
-            // Only real dates ("3pm to 5pm" on its own is a time range, read the usual way).
-            guard Pattern.writtenDate.firstMatch(in: piece, range: whole) != nil else { continue }
+            // Only real dates ("3pm to 5pm" on its own is a time range, read the usual way), and only
+            // with a "to" or a dash between two ends ("from dec 1" alone is just a start day).
+            guard Pattern.writtenDate.firstMatch(in: piece, range: whole) != nil,
+                  Pattern.rangeJoin.firstMatch(in: piece, range: whole) != nil else { continue }
             let end = date.addingTimeInterval(m.duration)
             // "Dec 20 to Dec 23 2027": the year written once belongs to both ends (the reader takes
             // the first date as this year, which would make it a range of more than a year).

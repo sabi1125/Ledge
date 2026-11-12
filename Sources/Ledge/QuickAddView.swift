@@ -538,6 +538,14 @@ struct QuickAddView: View {
         }
         let short = { (d: Date) in d.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
         let time = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
+        // Repeating: "Every Mon, Wed, Fri · 5:00 PM – 7:00 PM · from Fri, Nov 13 · until Dec 31, 2029".
+        if let rule = draft.repeatRule {
+            var parts = [rule.summary()]
+            parts.append(draft.isAllDay ? "All day" : "\(time(draft.start)) – \(time(draft.end))")
+            parts.append("from " + (cal.isDate(draft.start, inSameDayAs: now) ? "today" : short(draft.start)))
+            if let until = rule.until { parts.append("until " + until.formatted(.dateTime.month(.abbreviated).day().year())) }
+            return parts.joined(separator: " · ")
+        }
         if draft.isAllDay {
             // Several days: "Wed, Jan 20 – Mon, Jan 25 · All day" (the end is the day after the last).
             let last = cal.date(byAdding: .day, value: -1, to: draft.end) ?? draft.end
@@ -562,6 +570,8 @@ struct QuickAddView: View {
     /// The due date (or "No due date"), "Alarm" with a time, and "Link" when there is one.
     static func todoDetails(_ todo: TodoDraft) -> String {
         var parts = [todo.hasDue ? TodoWords.due(todo.event.start, hasTime: todo.dueHasTime) : "No due date"]
+        // "Every Fri · Due Fri 8:00 AM"
+        if let rule = todo.event.repeatRule, todo.hasDue { parts.insert(rule.summary(), at: 0) }
         // A time of day means Reminders will ring then (on your Mac and iPhone).
         if todo.dueHasTime { parts.append("Alarm") }
         if todo.url != nil { parts.append("Link") }

@@ -141,6 +141,7 @@ final class CalendarStore: ObservableObject {
         event.startDate = draft.start
         event.endDate = draft.end
         event.isAllDay = draft.isAllDay
+        if let rule = draft.repeatRule { event.addRecurrenceRule(rule.eventKitRule) }
         let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { event.notes = trimmed }
         event.calendar = target
@@ -176,7 +177,8 @@ final class CalendarStore: ObservableObject {
         justAddedID = nil
         guard let event = store.event(withIdentifier: added.eventID) else { return }
         do {
-            try store.remove(event, span: .thisEvent, commit: true)
+            // A repeating one goes as a whole series (it was only just made).
+            try store.remove(event, span: event.hasRecurrenceRules ? .futureEvents : .thisEvent, commit: true)
             LedgeLog.shared.write("calendar: quick add undone")
         } catch {
             LedgeLog.shared.write("calendar: undo failed: \(error.localizedDescription)")
@@ -190,5 +192,26 @@ final class CalendarStore: ObservableObject {
         access = .granted
         events = items
         timer?.invalidate()
+    }
+}
+
+extension RepeatRule {
+    /// The same repeat, for the Calendar and Reminders apps.
+    var eventKitRule: EKRecurrenceRule {
+        let frequency: EKRecurrenceFrequency
+        switch self.frequency {
+        case .daily: frequency = .daily
+        case .weekly: frequency = .weekly
+        case .monthly: frequency = .monthly
+        case .yearly: frequency = .yearly
+        }
+        let days = weekdays.compactMap { EKWeekday(rawValue: $0) }.map { EKRecurrenceDayOfWeek($0) }
+        // To the end of its last day.
+        let end = until.map { EKRecurrenceEnd(end: Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: $0) ?? $0) }
+        return EKRecurrenceRule(recurrenceWith: frequency, interval: interval,
+                                daysOfTheWeek: days.isEmpty ? nil : days,
+                                daysOfTheMonth: monthDay.map { [NSNumber(value: $0)] },
+                                monthsOfTheYear: nil, weeksOfTheYear: nil, daysOfTheYear: nil,
+                                setPositions: nil, end: end)
     }
 }

@@ -297,6 +297,8 @@ final class RemindersStore: ObservableObject {
             if draft.dueHasTime { r.addAlarm(EKAlarm(absoluteDate: draft.event.start)) }
         }
         r.url = draft.url
+        // "every fri 8am": a repeating reminder (it needs the due date, which it then has).
+        if let rule = draft.event.repeatRule, draft.hasDue { r.addRecurrenceRule(rule.eventKitRule) }
         // The Reminders app doesn't show links saved by other apps, so the link also goes first
         // in the notes, where it's visible (and clickable) everywhere.
         var body = notes.trimmingCharacters(in: .whitespacesAndNewlines)
