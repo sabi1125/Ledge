@@ -158,8 +158,9 @@ public enum Checklist {
     }
 
     /// Typing helpers for the notes box: "[] " at the start of a line becomes "- [ ] ", and return
-    /// on a checklist line starts the next one (return on an empty one ends the list).
-    /// Returns the new text, or nil when nothing needs changing.
+    /// on a list, numbered, checklist or "> " quote line starts the next one ("2." after "1.").
+    /// Return on an empty one ends it; return right before an item's text pushes the item down,
+    /// leaving an empty one above. Returns the new text, or nil when nothing needs changing.
     public static func autoFormat(old: String, new: String) -> String? {
         // "[] " or "[ ] " typed at the start of a line.
         let range = NSRange(location: 0, length: (new as NSString).length)
@@ -180,12 +181,25 @@ public enum Checklist {
         let marker = ns.substring(with: m.range(at: 2))
         let content = ns.substring(with: m.range(at: 3))
         let after = String(a[at...])
+        let isCheckbox = marker.hasPrefix("- [") || marker.hasPrefix("* [")
+        let emptyMarker = isCheckbox ? "- [ ] " : marker
         if content.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let first = after.first, first != "\n" {
+                // Return right before an item's text: the item moves down, an empty one stays above.
+                return String(before[..<lineStart]) + indent + emptyMarker + "\n" + indent + marker + after
+            }
             // Return on an empty item: end the list (drop the empty marker, no new line).
             return String(before[..<lineStart]) + indent + after
         }
-        let next = marker.hasPrefix("- [") || marker.hasPrefix("* [") ? "- [ ] " : marker
-        return before + "\n" + indent + next + after
+        return before + "\n" + indent + nextMarker(after: marker, isCheckbox: isCheckbox) + after
+    }
+
+    /// The marker for the item after this one: "2. " after "1. ", an empty box after any box.
+    private static func nextMarker(after marker: String, isCheckbox: Bool) -> String {
+        if isCheckbox { return "- [ ] " }
+        let digits = marker.prefix { $0.isNumber }
+        guard let number = Int(digits) else { return marker }
+        return String(number + 1) + marker.dropFirst(digits.count)
     }
 
     /// A list line ("- item", "* item", "- [ ] step"), which Tab indents as a whole.
@@ -199,8 +213,8 @@ public enum Checklist {
 
     private static let item = try! NSRegularExpression(pattern: #"^\s*[-*] \[([ xX])\] ?(.*)$"#)
     private static let shortcut = try! NSRegularExpression(pattern: #"(?m)^([ \t]*)\[ ?\] "#)
-    private static let listLine = try! NSRegularExpression(pattern: #"^[ \t]*[-*] "#)
-    private static let continuing = try! NSRegularExpression(pattern: #"^([ \t]*)([-*] \[[ xX]\] |[-*] )(.*)$"#)
+    private static let listLine = try! NSRegularExpression(pattern: #"^[ \t]*([-*+]|\d{1,9}[.)]) "#)
+    private static let continuing = try! NSRegularExpression(pattern: #"^([ \t]*)([-*] \[[ xX]\] |[-*+] |\d{1,9}[.)] |> ?)(.*)$"#)
 }
 
 // MARK: - Links in notes

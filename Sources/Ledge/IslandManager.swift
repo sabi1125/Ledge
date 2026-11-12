@@ -127,6 +127,7 @@ final class IslandManager {
             ?? controllers.values.first { $0.model.style == .notch }
             ?? controllers.values.first
         for c in controllers.values where c !== target { c.model.closeSettings() }
+        target?.revealForShortcut()
         target?.model.openSettings()
     }
 
@@ -233,7 +234,20 @@ final class IslandManager {
             ?? controllers.values.first { $0.model.style == .notch }
             ?? controllers.values.first
         for c in controllers.values where c !== target && c.model.isExpanded { c.model.close() }
+        target?.revealForShortcut()
         target?.model.openQuickAdd(kind)
+    }
+
+    /// ⌘L: opens the island on the screen you're pointing at (or the MacBook screen), or closes it.
+    func toggleFromShortcut() {
+        let p = NSEvent.mouseLocation
+        let target = controllers.values.first { $0.contains(point: p) && !$0.isSuppressed }
+            ?? controllers.values.first { $0.model.style == .notch }
+            ?? controllers.values.first
+        for c in controllers.values where c !== target && c.model.isExpanded { c.model.close() }
+        // Opening (not closing) on a full-screen desktop: the hidden pill comes in first.
+        if target?.model.isExpanded == false { target?.revealForShortcut() }
+        target?.model.toggleFromShortcut()
     }
 
     func islandUnderPointer() -> IslandModel? {

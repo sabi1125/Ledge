@@ -441,8 +441,23 @@ struct NotesPage: View {
     /// Delete was clicked once; a second click within 3 seconds deletes.
     @State private var confirmingDelete = false
     @AppStorage(Pref.notesSidebar) private var showsList = true
+    /// The note's text box (a macOS text view, so it sits outside `focus`) has the cursor.
+    @State private var bodyFocused = false
+    /// The cursor should go into the text box, as soon as it's on screen.
+    @State private var wantsBodyFocus = false
+    /// Each change takes the cursor out of the text box.
+    @State private var bodyBlurRequest = 0
 
-    private enum Field { case search, title, body }
+    private enum Field { case search, title }
+
+    /// The cursor is somewhere on this page (search, title or the note), or about to be.
+    private var isEditing: Bool { focus != nil || bodyFocused || wantsBodyFocus }
+
+    @Environment(\.isTwinWindow) private var isTwinWindow
+    /// A floating pill has two windows (the normal one and its full-screen twin), each with its own
+    /// copy of this page. Only the copy on screen takes the cursor and starts or ends typing;
+    /// otherwise the hidden copy takes the keyboard from the one you're looking at.
+    private var inShowingWindow: Bool { isTwinWindow == model.twinIsShowing }
 
     var body: some View {
         Group {
@@ -469,16 +484,37 @@ struct NotesPage: View {
         .padding(.top, 4)
         .padding(.bottom, 14)
         .onAppear { if visible { notes.refresh() } }
-        .onChange(of: visible) { _, now in if now { notes.refresh() } }
+        .onChange(of: visible) { _, now in
+            guard now else { return }
+            notes.refresh()
+            takeCursorIfAsked()
+        }
         // Only while this page is the one showing: the pages sit side by side, and a hidden one
         // must never take the cursor or end typing that belongs to quick add.
         .disabled(!visible)
-        .onChange(of: focus) { _, now in
-            guard visible, !model.isQuickAdding else { return }
+        .onChange(of: isEditing) { _, now in
+            guard visible, inShowingWindow, !model.isQuickAdding else { return }
             // Ledge takes the keyboard while you type (so ⌘C/⌘V, Tab and Esc all work).
-            if now != nil { model.beginNotesTyping() } else { model.isTyping = false }
+            if now {
+                model.beginNotesTyping()
+            } else {
+                // A turn later: moving between the title and the note briefly has neither.
+                DispatchQueue.main.async {
+                    guard !isEditing, model.isTyping else { return }
+                    LedgeLog.shared.write("notes: typing ends (nothing on the page has the cursor)")
+                    model.isTyping = false
+                }
+            }
         }
-        .onChange(of: model.isTyping) { _, now in if !now { focus = nil } }
+        .onChange(of: model.isTyping) { _, now in
+            guard !now else { return }
+            focus = nil
+            wantsBodyFocus = false
+            bodyBlurRequest += 1
+        }
+        // ⌘L opened the island on Notes: the cursor goes into the note.
+        // (`initial`: the page is usually built just after ⌘L asked, so there's no change to see.)
+        .onChange(of: model.notesWantsCursor, initial: true) { _, _ in takeCursorIfAsked() }
         // ⌘N or the pencil: the cursor goes to the new note's title (all selected, so typing replaces it).
         .onChange(of: notes.newNoteCount) { _, _ in focus = .title }
         // "[] " becomes a checkbox; return on a list line starts the next one (Tab indents it).
@@ -486,6 +522,13 @@ struct NotesPage: View {
             if let fixed = Checklist.autoFormat(old: old, new: new) { notes.text = fixed }
         }
         .onDisappear { notes.saveNow() }
+    }
+
+    /// ⌘L or ⌘1–⌘4 asked for the cursor in the note: take it, once this page is the one showing.
+    private func takeCursorIfAsked() {
+        guard model.notesWantsCursor, visible, inShowingWindow else { return }
+        model.notesWantsCursor = false
+        wantsBodyFocus = true
     }
 
     // MARK: The list of notes (the "Ledge" folder in Notes)
@@ -605,7 +648,10 @@ struct NotesPage: View {
                                 .textFieldStyle(.plain)
                                 .foregroundStyle(.white)
                                 .focused($focus, equals: .title)
-                                .onSubmit { focus = .body }
+                                .onSubmit {
+                                    focus = nil
+                                    wantsBodyFocus = true
+                                }
                         } else {
                             // While the island is still moving: plain text (see `IslandModel.isSettled`).
                             Text(notes.title.isEmpty ? "Title" : notes.title)
@@ -623,19 +669,14 @@ struct NotesPage: View {
                 }
                 ZStack(alignment: .topLeading) {
                     if model.isSettled {
-                        TextEditor(text: $notes.text)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white)
-                            .scrollContentBackground(.hidden)
-                            .scrollIndicators(.never)
-                            .focused($focus, equals: .body)
-                            .padding(.leading, -5)
+                        // Markdown is styled as you type: "## Plan" big, "**x**" bold, "---" a line.
+                        MarkdownEditor(text: $notes.text, wantsFocus: wantsBodyFocus, blurRequest: bodyBlurRequest) { now in
+                            bodyFocused = now
+                            if now { wantsBodyFocus = false }
+                        }
                     } else {
-                        // While the island is still moving: plain text (see `IslandModel.isSettled`).
-                        Text(notes.text)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                        MarkdownPreview(text: notes.text)
                     }
                     if notes.text.isEmpty {
                         Text("Jot something down… type [] for a checkbox")

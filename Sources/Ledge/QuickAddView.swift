@@ -23,6 +23,8 @@ struct QuickAddView: View {
     /// The pointer is on the "Added" confirmation: it stays until you move away (to reach its buttons).
     @State private var overConfirmation = false
     @FocusState private var focus: Field?
+    /// Esc hid the list suggestions; they come back with the next change to the line.
+    @State private var listsHidden = false
     /// The window this copy of quick add is in. The pill on another screen has a hidden twin window
     /// (for full-screen desktops) showing the same quick add; only the copy in the window you're
     /// typing in (the key window) reacts to keys, so the one you see is the one that saves.
@@ -87,6 +89,7 @@ struct QuickAddView: View {
         }
         .onChange(of: text) { _, _ in
             model.keepDraft(QuickAddDraft(text: text, notes: notes), for: kind)
+            listsHidden = false
             error = nil
             settled = false
             settleTask?.cancel()
@@ -107,8 +110,11 @@ struct QuickAddView: View {
             if let fixed = Checklist.autoFormat(old: old, new: new) { notes = fixed; return }
             model.keepDraft(QuickAddDraft(text: text, notes: notes), for: kind)
         }
+        // The island routes Tab and Esc here only while lists are suggested.
+        .onChange(of: suggestedLists.isEmpty, initial: true) { _, none in model.quickAddSuggestsLists = !none }
         .onDisappear {
             settleTask?.cancel()
+            model.quickAddSuggestsLists = false
         }
     }
 
@@ -195,9 +201,15 @@ struct QuickAddView: View {
                     + Text(todo.title.isEmpty ? "New to-do" : todo.title)
                         .foregroundStyle(todo.title.isEmpty ? Theme.secondaryText : Color.white))
                     .font(.system(size: 12.5, weight: .semibold))
-                todoLine(todo, hasText: hasText)
+                Group {
+                    let lists = suggestedLists
+                    if lists.isEmpty {
+                        todoLine(todo, hasText: hasText).contentTransition(.opacity)
+                    } else {
+                        listSuggestions(lists)
+                    }
+                }
                     .font(.system(size: 11).monospacedDigit())
-                    .contentTransition(.opacity)
             }
             .lineLimit(1)
             Spacer(minLength: 6)
@@ -216,7 +228,51 @@ struct QuickAddView: View {
         guard hasText else {
             return Text("! must · fri or 3pm due · #list · [30m] time guess").foregroundStyle(Theme.secondaryText)
         }
-        return Text(Self.todoSummary(todo, list: todos.listFor(tag: todo.listTag))).foregroundStyle(Theme.secondaryText)
+        let list = todos.listFor(tag: todo.listTag)
+        // A "#tag" that matches none of your lists makes a new list: say so, so it's never a surprise.
+        if list.isNew {
+            return Text("New list “\(list.title)”").foregroundStyle(Theme.timerOrange)
+                + Text(" · " + Self.todoDetails(todo)).foregroundStyle(Theme.secondaryText)
+        }
+        return Text(Self.todoSummary(todo, list: list)).foregroundStyle(Theme.secondaryText)
+    }
+
+    // MARK: List suggestions
+
+    /// Your Reminders lists that match the "#list" at the end of the to-do line, best first.
+    /// Empty when there's no "#list" being typed, nothing matches, or Esc hid them.
+    private var suggestedLists: [String] {
+        guard kind == .todos, !showsNotes, saved == nil, !listsHidden,
+              let tag = ListSuggest.activeTag(in: text) else { return [] }
+        return ListSuggest.matches(tag, in: todos.listTitles)
+    }
+
+    /// Up to 4 lists with their color dots. Tab takes the first one; a click takes any.
+    private func listSuggestions(_ lists: [String]) -> some View {
+        HStack(spacing: 12) {
+            ForEach(Array(lists.enumerated()), id: \.element) { index, title in
+                Button { takeList(title) } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(todos.listColors[title] ?? Theme.secondaryText)
+                            .frame(width: 6, height: 6)
+                        Text(title)
+                            .foregroundStyle(index == 0 ? Color.white : Theme.secondaryText)
+                        if index == 0 { KeyCap("tab").foregroundStyle(Theme.secondaryText) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(height: 13)
+        .lineLimit(1)
+    }
+
+    /// Puts the list's tag in place of the "#list" being typed, then the cursor back at the end.
+    private func takeList(_ title: String) {
+        text = ListSuggest.complete(text, with: title)
+        focusLine(.title)
     }
 
     private func hints(_ draft: QuickEventDraft, hasText: Bool) -> some View {
@@ -323,6 +379,10 @@ struct QuickAddView: View {
             let kept = model.draft(for: kind)
             if showsNotes { notes = kept.notes } else { text = kept.text }
             focusLine(showsNotes ? .notes : .title)
+        case .acceptListSuggestion:
+            if let first = suggestedLists.first { takeList(first) }
+        case .hideListSuggestions:
+            listsHidden = true
         case .toggleNotes, .back:
             break // handled by the model (`quickAddShowsNotes`)
         }
@@ -496,8 +556,12 @@ struct QuickAddView: View {
 
     /// "s3 data backup · Due Friday · Link", "Ledge (new list) · No due date".
     static func todoSummary(_ todo: TodoDraft, list: (title: String, isNew: Bool)) -> String {
-        var parts = [list.isNew ? "\(list.title) (new list)" : list.title]
-        parts.append(todo.hasDue ? TodoWords.due(todo.event.start, hasTime: todo.dueHasTime) : "No due date")
+        (list.isNew ? "\(list.title) (new list)" : list.title) + " · " + todoDetails(todo)
+    }
+
+    /// The due date (or "No due date"), "Alarm" with a time, and "Link" when there is one.
+    static func todoDetails(_ todo: TodoDraft) -> String {
+        var parts = [todo.hasDue ? TodoWords.due(todo.event.start, hasTime: todo.dueHasTime) : "No due date"]
         // A time of day means Reminders will ring then (on your Mac and iPhone).
         if todo.dueHasTime { parts.append("Alarm") }
         if todo.url != nil { parts.append("Link") }

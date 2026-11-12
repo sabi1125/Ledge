@@ -100,6 +100,18 @@ public enum QuickEventParser {
                 }
             }
         }
+        // "in 3 days", "in 2 weeks", "in a month": counted from now.
+        if day == nil, let found = firstMatch(Pattern.inDays, in: text, ns, isFree, read: { m, ns -> DateComponents? in
+            guard let amount = group(m, 1, ns), let unit = group(m, 2, ns) else { return nil }
+            let n = Int(amount) ?? ((amount == "a" || amount == "an") ? 1 : 0)
+            guard n > 0 else { return nil }
+            var c = DateComponents()
+            if unit.hasPrefix("w") { c.day = 7 * n } else if unit.hasPrefix("m") { c.month = n } else { c.day = n }
+            return c
+        }) {
+            used.append(found.0.range)
+            day = calendar.date(byAdding: found.1, to: today)
+        }
         // "next week": its Monday.
         if day == nil, let found = firstMatch(Pattern.nextWeek, in: text, ns, isFree, read: { _, _ in true }) {
             used.append(found.0.range)
@@ -165,7 +177,9 @@ public enum QuickEventParser {
         /// today, tonight, tomorrow, (next) friday, on mon…
         static let day = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?(next\s+|this\s+)?(today|tonight|tomorrow|tmrw|tmr|monday|mon|tuesday|tues|tue|wednesday|weds|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)(?![\w])"#)
         /// Written dates the system date reader may find: month names, 12/3, 2026-12-20, in 3 days.
-        static let writtenDate = make(#"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d|\d\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}/\d{1,2}|\d{4}-\d{1,2}-\d{1,2}|(?<![\w])in\s+\d+\s+(days?|weeks?|months?)(?![\w])"#)
+        static let writtenDate = make(#"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d|\d\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}/\d{1,2}|\d{4}-\d{1,2}-\d{1,2}"#)
+        /// in 3 days, in 2 weeks, in a month
+        static let inDays = make(#"(?<![\w])in\s+(\d+|an?)\s+(days?|weeks?|months?)(?![\w])"#)
         /// in 3 hours, in 30 min, after 20 minutes, in an hour, in half an hour, in 1.5h
         static let relative = make(#"(?<![\w])(?:in|after)\s+(\d+(?:\.\d+)?|an?|half\s+an?)\s*(hours?|hrs?|h|minutes?|mins?|m)(?![\w])"#)
         /// 3 hours from now, 3hours from now, 20 min from now

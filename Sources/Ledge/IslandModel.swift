@@ -63,6 +63,7 @@ final class IslandModel: ObservableObject {
     @Published var isTyping = false {
         didSet {
             guard !isTyping else { return }
+            notesWantsCursor = false
             // Clicking away also ends quick add or an open to-do, but remembers it, so the island
             // reopens right there (with what you typed) next time.
             if isQuickAdding {
@@ -80,7 +81,10 @@ final class IslandModel: ObservableObject {
     @Published private(set) var quickAddKind: CalendarMode = .events
     /// The Calendar page's Events · To-dos switch (remembered).
     @Published var calendarMode: CalendarMode = CalendarMode.saved {
-        didSet { UserDefaults.standard.set(calendarMode.rawValue, forKey: CalendarMode.key) }
+        didSet {
+            UserDefaults.standard.set(calendarMode.rawValue, forKey: CalendarMode.key)
+            if calendarMode != oldValue { recompute() }
+        }
     }
     /// Where the island was when it closed by accident (a click elsewhere): quick add or an open
     /// to-do. Opening it again goes straight back there. Saving or Esc clears it.
@@ -102,10 +106,53 @@ final class IslandModel: ObservableObject {
     let quickAddKeys = PassthroughSubject<QuickAddKey, Never>()
     /// Quick add is showing its "Added" confirmation (keys do nothing then, except Esc).
     var quickAddIsConfirming = false
+    /// Quick add is suggesting Reminders lists for a "#list" being typed (Tab takes the first,
+    /// Esc hides them). Set by the quick add view.
+    var quickAddSuggestsLists = false
+
+    /// ⌘L opened the island on Notes: the note should get the cursor. A flag, not a one-off
+    /// signal, because the Notes page only exists once the island has opened; it clears it on taking it.
+    @Published var notesWantsCursor = false
+    /// On a full-screen desktop, the pill's full-screen twin is showing (not the normal window).
+    /// Each window has its own copy of the pages; only the copy on screen takes the cursor.
+    @Published var twinIsShowing = false
 
     private var hudTimer: Timer?
     private var hoverTimer: Timer?
     private var collapseTimer: Timer?
+    /// Watches whether the to-do list is long enough for the bigger island.
+    private var todoCountWatch: AnyCancellable?
+
+    init() {
+        // More than 2 to-dos: the list gets the bigger island, so they're all in view at once.
+        todoCountWatch = RemindersStore.shared.$items
+            .map { $0.count > Self.shortTodoListLimit }
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                // $items fires before the new list is stored, so look again on the next turn.
+                DispatchQueue.main.async { self?.recompute() }
+            }
+    }
+
+    /// Up to this many to-dos fit the normal open island; more get the bigger one.
+    static let shortTodoListLimit = 2
+
+    /// The Calendar page shows the to-do list (not quick add or one to-do) with more than 2 to-dos.
+    private var showsLongTodoList: Bool {
+        page == .calendar && calendarMode == .todos && !isQuickAdding && openTodoID == nil
+            && RemindersStore.shared.items.count > Self.shortTodoListLimit
+    }
+
+    /// ⌘L from anywhere: opens the island where you left off, or closes it when it's open.
+    /// On the Notes page the cursor goes straight into the note.
+    func toggleFromShortcut() {
+        if isShowingSettings { closeSettings(); return }
+        if isExpanded { close(); return }
+        expand(force: true)
+        guard isExpanded, page == .notes else { return }
+        beginNotesTyping()
+        notesWantsCursor = true
+    }
 
     // MARK: Inputs
 
@@ -173,10 +220,16 @@ final class IslandModel: ObservableObject {
         let available = pages
         guard isExpanded, number >= 1, number <= available.count else { return }
         show(page: available[number - 1])
+        // Picked from the keyboard, so you're about to type: the cursor goes into the note.
+        if page == .notes {
+            beginNotesTyping()
+            notesWantsCursor = true
+        }
     }
 
     /// The Notes page's text box got the cursor: take the keyboard like quick add does.
     func beginNotesTyping() {
+        if !isTyping { LedgeLog.shared.write("notes: typing starts (page \(page.rawValue))") }
         isTyping = true
         onBeginTyping?()
     }
@@ -424,6 +477,8 @@ final class IslandModel: ObservableObject {
             // Bigger for notes: the Notes page (tallest), a to-do's notes, and quick add notes.
             if page == .notes { next = .expandedNotes }
             else if openTodoID != nil || (isQuickAdding && quickAddShowsNotes) { next = .expandedTall }
+            // A long to-do list gets the bigger island too, so every to-do shows without scrolling.
+            else if showsLongTodoList { next = .expandedTall }
             else { next = .expanded }
         } else if hud != nil {
             next = .hud
@@ -492,6 +547,10 @@ enum QuickAddKey {
     case save
     /// Characters typed before the text field has the cursor (right after ⌘T or ⌃⌥T).
     case typeAhead(String)
+    /// Tab while lists are suggested: take the first one.
+    case acceptListSuggestion
+    /// Esc while lists are suggested: hide them (a second Esc cancels quick add).
+    case hideListSuggestions
 }
 
 enum MediaCommand {

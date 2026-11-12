@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var revealHotKey: HotKey?
     private var quickEventHotKey: HotKey?
     private var quickTodoHotKey: HotKey?
+    private var openHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.registerDefaults()
@@ -149,6 +150,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         quickTodoHotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey, id: 3) { [weak self] in
             self?.islands.quickAdd(.todos)
+        }
+        // ⌘L: open Ledge (or close it), without hovering. Note: this takes ⌘L from every app,
+        // including the browsers' "go to the address bar".
+        openHotKey = HotKey(keyCode: kVK_ANSI_L, modifiers: cmdKey, id: 4) { [weak self] in
+            self?.islands.toggleFromShortcut()
         }
 
         if !Pref.bool(Pref.didFirstLaunch), !LoginItem.isEnabled {

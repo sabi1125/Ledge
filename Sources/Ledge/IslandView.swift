@@ -694,10 +694,21 @@ private struct IsVisiblePageKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+/// Whether this copy of the island is the full-screen twin (see `IslandController`). Each floating
+/// pill has two windows, each with its own copy of every page; only one of them is on screen.
+private struct IsTwinWindowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var isVisiblePage: Bool {
         get { self[IsVisiblePageKey.self] }
         set { self[IsVisiblePageKey.self] = newValue }
+    }
+
+    var isTwinWindow: Bool {
+        get { self[IsTwinWindowKey.self] }
+        set { self[IsTwinWindowKey.self] = newValue }
     }
 }
 

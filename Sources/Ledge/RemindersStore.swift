@@ -49,6 +49,8 @@ final class RemindersStore: ObservableObject {
     @Published private(set) var doneToday = 0
     /// List names, for matching "#s3" while you type.
     @Published private(set) var listTitles: [String] = []
+    /// Each list's color, by name, for the list suggestions in quick add.
+    @Published private(set) var listColors: [String: Color] = [:]
     @Published private(set) var defaultListTitle = "Reminders"
     /// The to-do quick add just saved, softly highlighted for a moment.
     @Published private(set) var justAddedID: String?
@@ -115,6 +117,8 @@ final class RemindersStore: ObservableObject {
         let lists = store.calendars(for: .reminder)
         let titles = lists.map(\.title)
         if titles != listTitles { listTitles = titles }
+        let colors = Dictionary(lists.map { ($0.title, Color(nsColor: $0.color ?? .systemOrange)) }, uniquingKeysWith: { first, _ in first })
+        if colors != listColors { listColors = colors }
         let fallback = store.defaultCalendarForNewReminders()?.title ?? "Reminders"
         if fallback != defaultListTitle { defaultListTitle = fallback }
 
@@ -253,11 +257,9 @@ final class RemindersStore: ObservableObject {
         return (tag, true)
     }
 
+    /// The best list for a tag ("#s3"): same name, then starts with, then contains (see `ListSuggest`).
     nonisolated static func match(_ tag: String, in titles: [String]) -> String? {
-        let t = tag.lowercased().replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
-        return titles.first { $0.lowercased() == t }
-            ?? titles.first { $0.lowercased().hasPrefix(t) }
-            ?? titles.first { $0.lowercased().contains(t) }
+        ListSuggest.matches(tag, in: titles, limit: 1).first
     }
 
     func add(_ draft: TodoDraft, notes: String) -> Result<AddedTodo, QuickAddError> {

@@ -19,7 +19,8 @@ final class IslandPanel: NSPanel {
         acceptsMouseMovedEvents = true
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
-        // No .fullScreenAuxiliary: the island stays out of full-screen apps and videos.
+        // No .fullScreenAuxiliary here: floating pills stay out of full-screen desktops (they're
+        // revealed from the top edge). The notch island adds it in `start(on:)`.
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
     }
 
@@ -135,7 +136,9 @@ final class IslandController {
         let m = model
         if m.isShowingSettings { m.closeSettings(); return true }
         if m.isQuickAdding {
-            if m.quickAddShowsNotes && !m.quickAddIsConfirming { m.quickAddShowsNotes = false }
+            if m.quickAddSuggestsLists && !m.quickAddShowsNotes && !m.quickAddIsConfirming {
+                m.quickAddKeys.send(.hideListSuggestions)
+            } else if m.quickAddShowsNotes && !m.quickAddIsConfirming { m.quickAddShowsNotes = false }
             else { m.cancelQuickAdd() }
             return true
         }
@@ -210,6 +213,45 @@ final class IslandController {
             editor.insertText("[] ", replacementRange: NSRange(location: selection.location - 1, length: 2))
             return true
         }
+    }
+
+    /// In a notes box: the third "`" of an opening "```" also types the closing "```" on the line
+    /// below. The cursor stays right after the opening one, to type a language ("bash") or return.
+    private static func closeCodeFence(for e: NSEvent) -> Bool {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isDisjoint(with: [.command, .control, .option]), e.characters == "`",
+              let window = e.window as? IslandPanel, window.isKeyWindow,
+              let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor,
+              !editor.hasMarkedText(),
+              Self.typesLatin(editor.inputContext?.selectedKeyboardInputSource)
+        else { return false }
+        let selection = editor.selectedRange()
+        guard selection.length == 0,
+              let indent = MarkdownStyle.fenceToClose(typingBacktickAt: selection.location, in: editor.string)
+        else { return false }
+        editor.insertText("`\n" + indent + "```", replacementRange: selection)
+        editor.setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+        return true
+    }
+
+    /// In a notes box: backspace right where a list item's or quote's text starts removes the
+    /// whole marker ("- ", "- [ ] ", "1. ", "> "), so the line becomes plain text, like Notion.
+    private static func removeListMarker(for e: NSEvent) -> Bool {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.isDisjoint(with: [.command, .control, .option, .shift]),
+              let window = e.window as? IslandPanel, window.isKeyWindow,
+              let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor,
+              !editor.hasMarkedText()
+        else { return false }
+        let selection = editor.selectedRange()
+        guard selection.length == 0,
+              let marker = MarkdownStyle.markerToRemove(backspaceAt: selection.location, in: editor.string)
+        else { return false }
+        guard editor.shouldChangeText(in: marker, replacementString: "") else { return true }
+        editor.replaceCharacters(in: marker, with: "")
+        editor.didChangeText()
+        editor.setSelectedRange(NSRange(location: marker.location, length: 0))
+        return true
     }
 
     /// A plain keyboard layout, or an input method's Latin mode (e.g. Japanese 英数 "Roman").
@@ -369,9 +411,13 @@ final class IslandController {
         let panelFrame = NSRect(x: anchorRect.midX - size.width / 2, y: frame.maxY - size.height,
                                 width: size.width, height: size.height)
         if panel == nil { panel = makePanel(frame: panelFrame, size: size) }
-        // Floating pills hide during Mission Control (the notch island can stay).
+        // Floating pills hide during Mission Control (the notch island can stay). The notch island
+        // also stays on full-screen desktops (a full-screen browser or video): there the strip
+        // beside the notch is black, so the closed island just looks like the notch, as usual.
         if style == .floating {
             panel?.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        } else {
+            panel?.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         }
         panel?.setFrame(panelFrame, display: true)
         if !isHidden { panel?.orderFrontRegardless() }
@@ -379,7 +425,7 @@ final class IslandController {
         // the pill there is then just a fade (macOS needs no time to set anything up).
         if style == .floating {
             if revealPanel == nil {
-                let r = makePanel(frame: panelFrame, size: size)
+                let r = makePanel(frame: panelFrame, size: size, isTwin: true)
                 r.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
                 r.alphaValue = 0
                 r.ignoresMouseEvents = true
@@ -394,7 +440,8 @@ final class IslandController {
         }
     }
 
-    private func makePanel(frame: NSRect, size: CGSize) -> IslandPanel {
+    /// `isTwin`: the full-screen twin of a floating pill.
+    private func makePanel(frame: NSRect, size: CGSize, isTwin: Bool = false) -> IslandPanel {
         let p = IslandPanel(frame: frame)
         p.allowsKey = { [weak self] in
             MainActor.assumeIsolated {
@@ -411,7 +458,7 @@ final class IslandController {
         }
         let root = IslandRootView(model: model, calendar: calendar, notes: notes, timer: timer, awake: awake,
                                   settings: settings, updater: updater, openSettings: openSettings)
-        let host = FirstMouseHostingView(rootView: root)
+        let host = FirstMouseHostingView(rootView: root.environment(\.isTwinWindow, isTwin))
         host.frame = NSRect(origin: .zero, size: size)
         host.autoresizingMask = [.width, .height]
         p.contentView = host
@@ -520,10 +567,22 @@ final class IslandController {
                 UserDefaults.standard.set(!Pref.bool(Pref.notesSidebar), forKey: Pref.notesSidebar)
                 return nil
             }
+            // Tab while quick add suggests lists for a "#list": takes the first one.
+            if e.keyCode == 48, e.modifierFlags.intersection(.deviceIndependentFlagsMask).isDisjoint(with: [.command, .control, .option, .shift]),
+               MainActor.assumeIsolated({ () -> Bool in
+                   guard let m = self?.model, m.isQuickAdding, m.quickAddSuggestsLists,
+                         !m.quickAddShowsNotes, !m.quickAddIsConfirming else { return false }
+                   m.quickAddKeys.send(.acceptListSuggestion)
+                   return true
+               }) { return nil }
             // Tab in a notes box: indents the line by 4 spaces (⇧Tab takes them away), Markdown style.
             if e.keyCode == 48, MainActor.assumeIsolated({ Self.indentNotes(for: e) }) { return nil }
             // "[" in a notes box closes itself: "[]" with the cursor in between.
             if MainActor.assumeIsolated({ Self.pairBrackets(for: e) }) { return nil }
+            // "```" in a notes box puts the closing "```" on the line below.
+            if MainActor.assumeIsolated({ Self.closeCodeFence(for: e) }) { return nil }
+            // Backspace right before a list item's text removes its bullet or box in one go.
+            if e.keyCode == 51, MainActor.assumeIsolated({ Self.removeListMarker(for: e) }) { return nil }
             let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let command = flags.contains(.command)
             var key: QuickAddKey?
@@ -623,9 +682,12 @@ final class IslandController {
                 }
             }
         } else {
-            // Stays while you're up in the menu bar, on the pill, or using the open island.
+            // Stays while you're up in the menu bar or on the pill, and while the island is open
+            // (it closes on a click outside or Esc, like on a normal desktop; ⌘L may have opened
+            // it with the pointer on another screen).
             let showingAlert = alertUntil.map { Date() < $0 } ?? false
-            let keep = showingAlert || onThisScreen && (fromTop <= 26 || hitRect().contains(p) || model.isExpanded || model.isShowingSettings)
+            let inUse = model.isExpanded || model.isShowingSettings || model.isTyping
+            let keep = showingAlert || inUse || onThisScreen && (fromTop <= 26 || hitRect().contains(p))
             if keep {
                 hideReveal?.cancel()
                 hideReveal = nil
@@ -657,9 +719,18 @@ final class IslandController {
         if let fs = fullScreenSpace, revealedSpace == nil { beginReveal(on: fs) }
     }
 
+    /// A shortcut (⌘L, quick add, settings) is about to open this island: on a full-screen
+    /// desktop, where the pill is hidden, bring it in first so there's something to open.
+    func revealForShortcut() {
+        guard model.style == .floating, let fs = fullScreenSpace, revealedSpace == nil else { return }
+        LedgeLog.shared.write("fullscreen: a shortcut opened the pill on display \(displayID)")
+        beginReveal(on: fs)
+    }
+
     private func beginReveal(on space: UInt64) {
         guard let twin = revealPanel else { return }
         revealedSpace = space
+        model.twinIsShowing = true
         LedgeLog.shared.write("fullscreen: pointer at the top of display \(displayID), showing the pill")
         twin.contentView?.isHidden = false
         twin.orderFrontRegardless()
@@ -677,6 +748,7 @@ final class IslandController {
         if model.isShowingSettings { model.closeSettings() }
         LedgeLog.shared.write("fullscreen: hiding the pill again on display \(displayID)")
         revealedSpace = nil
+        model.twinIsShowing = false
         twin.ignoresMouseEvents = true
         if animated {
             NSAnimationContext.runAnimationGroup({ ctx in

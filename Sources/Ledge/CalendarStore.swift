@@ -95,9 +95,10 @@ final class CalendarStore: ObservableObject {
         let found = store.events(matching: predicate)
             .filter { $0.endDate > now && $0.status != .canceled }
             .sorted { a, b in
-                // All-day events first within a day, then by start time.
-                if cal.isDate(a.startDate, inSameDayAs: b.startDate), a.isAllDay != b.isAllDay { return a.isAllDay }
-                return a.startDate < b.startDate
+                // What's next on top: the meeting you're in, then today's meetings, then today's
+                // all-day and day-long items; tomorrow the same (see `EventOrder`).
+                EventOrder.isBefore((a.startDate, a.endDate, a.isAllDay), (b.startDate, b.endDate, b.isAllDay),
+                                    now: now, calendar: cal)
             }
             .prefix(12)
             .map { e in
