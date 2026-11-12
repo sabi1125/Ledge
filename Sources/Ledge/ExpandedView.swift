@@ -96,6 +96,21 @@ struct TopBar: View {
         // Every title stays in place and only fades (the animation is limited to opacity), so when
         // the page changes while the island resizes, nothing here lags behind the moving edges.
         HStack(spacing: 0) {
+            // Settings, without the right-click (⌘, too). On the left: beside the notch on the
+            // right there's only room for the +, the cup and the dots.
+            Button { model.openSettings() } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Color(white: 0.85))
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color(white: 0.13)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressScaleStyle())
+            .help("Ledge Settings (⌘,)")
+            .padding(.trailing, 8)
+            .animation(.easeOut(duration: 0.2)) { $0.opacity(focused ? 0 : 1) }
+            .allowsHitTesting(!focused)
             ZStack(alignment: .leading) {
                 ForEach(model.pages, id: \.self) { p in
                     let shown = !focused && p == model.page

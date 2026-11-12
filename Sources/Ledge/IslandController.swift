@@ -274,6 +274,7 @@ final class IslandController {
     private var escapeHotKey: HotKey?
     private var newNoteHotKey: HotKey?
     private var newItemHotKey: HotKey?
+    private var settingsHotKey: HotKey?
     private var pageHotKeys: [HotKey] = []
 
     /// Esc steps back one level: notes → title line → cancel quick add; an open to-do → the list;
@@ -442,6 +443,15 @@ final class IslandController {
             }
         } else if !wantsNewNote, newNoteHotKey != nil {
             newNoteHotKey = nil
+        }
+        // ⌘, opens settings while the island is open (taken from other apps only during that time).
+        let wantsSettingsKey = m.isExpanded && !m.isShowingSettings
+        if wantsSettingsKey, settingsHotKey == nil {
+            settingsHotKey = HotKey(keyCode: kVK_ANSI_Comma, modifiers: cmdKey, id: 6000 + displayID % 1000) { [weak self] in
+                self?.model.openSettings()
+            }
+        } else if !wantsSettingsKey, settingsHotKey != nil {
+            settingsHotKey = nil
         }
         // ⌘1–⌘4 switch pages while the island is open (in the order of the dots).
         let wantsPages = m.isExpanded && !m.isShowingSettings
