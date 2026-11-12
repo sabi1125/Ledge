@@ -201,4 +201,65 @@ final class QuickEventTests: XCTestCase {
         XCTAssertEqual(d.title, "Plan the trip")
         XCTAssertEqual(d.start, day(2026, 11, 16))
     }
+
+    // MARK: Times from now
+
+    func testInSomeHours() {
+        let now = day(2026, 11, 11, 23, 23)
+        let d = QuickEventParser.parse("charge the laptop in 3 hours", now: now)
+        XCTAssertEqual(d.title, "charge the laptop")
+        XCTAssertFalse(d.isAllDay)
+        XCTAssertEqual(d.start, day(2026, 11, 12, 2, 23))
+    }
+
+    func testFromNowWithoutASpace() {
+        let now = day(2026, 11, 11, 23, 23)
+        let d = QuickEventParser.parse("remind me to charge the laptop 3hours from now", now: now)
+        XCTAssertEqual(d.title, "charge the laptop")
+        XCTAssertEqual(d.start, day(2026, 11, 12, 2, 23))
+    }
+
+    func testOtherWaysToSayIt() {
+        let now = day(2026, 11, 11, 10, 0)
+        let cases: [(String, Date)] = [
+            ("check the oven in 30 min", day(2026, 11, 11, 10, 30)),
+            ("check the oven in 30m", day(2026, 11, 11, 10, 30)),
+            ("stretch after 20 minutes", day(2026, 11, 11, 10, 20)),
+            ("call back in an hour", day(2026, 11, 11, 11, 0)),
+            ("tea in half an hour", day(2026, 11, 11, 10, 30)),
+            ("leave in 1.5 hours", day(2026, 11, 11, 11, 30)),
+            ("laundry 45 min from now", day(2026, 11, 11, 10, 45)),
+        ]
+        for (text, start) in cases {
+            let d = QuickEventParser.parse(text, now: now)
+            XCTAssertEqual(d.start, start, text)
+            XCTAssertTrue(d.foundDate, text)
+            XCTAssertFalse(d.title.lowercased().contains(" in "), text)
+        }
+    }
+
+    func testSecondsAreDropped() {
+        let now = day(2026, 11, 11, 10, 0).addingTimeInterval(42)
+        XCTAssertEqual(QuickEventParser.parse("call in 2 hours", now: now).start, day(2026, 11, 11, 12, 0))
+    }
+
+    func testEventFromNowWithALength() {
+        let now = day(2026, 11, 11, 10, 0)
+        let d = QuickEventParser.parse("call mom in 2 hours for 30 min", now: now)
+        XCTAssertEqual(d.title, "call mom")
+        XCTAssertEqual(d.start, day(2026, 11, 11, 12, 0))
+        XCTAssertEqual(d.end, day(2026, 11, 11, 12, 30))
+    }
+
+    func testNumbersWithoutInOrFromNowStay() {
+        let d = QuickEventParser.parse("buy 3 hours of parking", now: day(2026, 11, 11, 10, 0))
+        XCTAssertEqual(d.title, "buy 3 hours of parking")
+        XCTAssertFalse(d.foundDate)
+    }
+
+    func testReminderWordsAreDropped() {
+        XCTAssertEqual(QuickEventParser.parse("remind me to water the plants").title, "water the plants")
+        XCTAssertEqual(QuickEventParser.parse("don't forget to water the plants").title, "water the plants")
+        XCTAssertEqual(QuickEventParser.parse("remind me water the plants").title, "water the plants")
+    }
 }

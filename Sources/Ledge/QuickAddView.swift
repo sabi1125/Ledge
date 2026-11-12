@@ -498,6 +498,8 @@ struct QuickAddView: View {
     static func todoSummary(_ todo: TodoDraft, list: (title: String, isNew: Bool)) -> String {
         var parts = [list.isNew ? "\(list.title) (new list)" : list.title]
         parts.append(todo.hasDue ? TodoWords.due(todo.event.start, hasTime: todo.dueHasTime) : "No due date")
+        // A time of day means Reminders will ring then (on your Mac and iPhone).
+        if todo.dueHasTime { parts.append("Alarm") }
         if todo.url != nil { parts.append("Link") }
         return parts.joined(separator: " · ")
     }

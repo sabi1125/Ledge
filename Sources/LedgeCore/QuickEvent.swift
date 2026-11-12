@@ -23,7 +23,7 @@ public struct QuickEventDraft: Equatable, Sendable {
 ///
 /// Understands: today, tonight, tomorrow (tmrw), weekdays (mon, friday, next fri), times (3pm,
 /// 3:30pm, 15:00, at 7, noon, midnight), ranges (7-8pm, 11-1pm, 9:30 to 10:15am), lengths
-/// (for 90 min, for 2h), next week and, on macOS, written dates such as "Nov 20", "12/3",
+/// (for 90 min, for 2h), times from now (in 3 hours, 30 min from now), next week and, on macOS, written dates such as "Nov 20", "12/3",
 /// "2026-12-20" or "in 3 days", and ranges from one date to another ("Jan 20 to Jan 25").
 public enum QuickEventParser {
     public static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current,
@@ -31,6 +31,22 @@ public enum QuickEventParser {
         let ns = text as NSString
         var used: [NSRange] = []
         func isFree(_ r: NSRange) -> Bool { !used.contains { NSIntersectionRange($0, r).length > 0 } }
+
+        // A time from now: "in 3 hours", "in 30 min", "3 hours from now". The whole line is about
+        // that moment, so it wins over any other day or time words.
+        if let found = relativeTime(in: text, ns) {
+            var length = defaultDuration
+            var pieces = [found.range]
+            if let d = firstMatch(Pattern.duration, in: text, ns, { NSIntersectionRange($0, found.range).length == 0 }, read: readDuration) {
+                length = d.1
+                pieces.append(d.0.range)
+            }
+            // To the minute (seconds would show as an odd time).
+            let raw = now.addingTimeInterval(found.seconds)
+            let start = Date(timeIntervalSinceReferenceDate: (raw.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60)
+            return QuickEventDraft(title: cleanTitle(ns, removing: pieces), start: start, end: start.addingTimeInterval(length),
+                                   isAllDay: false, foundDate: true)
+        }
 
         // From one date to another: "Jan 20 2027 to Jan 25 2027", "Dec 20-23", "12/20 - 12/23",
         // "Dec 20 9am to Dec 21 5pm". Read as a whole first, so its two halves aren't taken apart.
@@ -150,6 +166,12 @@ public enum QuickEventParser {
         static let day = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?(next\s+|this\s+)?(today|tonight|tomorrow|tmrw|tmr|monday|mon|tuesday|tues|tue|wednesday|weds|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)(?![\w])"#)
         /// Written dates the system date reader may find: month names, 12/3, 2026-12-20, in 3 days.
         static let writtenDate = make(#"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d|\d\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}/\d{1,2}|\d{4}-\d{1,2}-\d{1,2}|(?<![\w])in\s+\d+\s+(days?|weeks?|months?)(?![\w])"#)
+        /// in 3 hours, in 30 min, after 20 minutes, in an hour, in half an hour, in 1.5h
+        static let relative = make(#"(?<![\w])(?:in|after)\s+(\d+(?:\.\d+)?|an?|half\s+an?)\s*(hours?|hrs?|h|minutes?|mins?|m)(?![\w])"#)
+        /// 3 hours from now, 3hours from now, 20 min from now
+        static let fromNow = make(#"(?<![\w])(\d+(?:\.\d+)?|an?|half\s+an?)\s*(hours?|hrs?|h|minutes?|mins?|m)\s+from\s+now(?![\w])"#)
+        /// "remind me to", "don't forget to" at the start: not part of the title.
+        static let reminderPrefix = make(#"^\s*(?:please\s+)?(?:remind\s+me(?:\s+to)?|don'?t\s+forget(?:\s+to)?|remember\s+to)\s+"#)
         /// next week
         static let nextWeek = make(#"(?<![\w])(?:on\s+|due\s+|by\s+)?next\s+week(?![\w])"#)
         /// A time of day inside a date range ("Dec 20 9am to Dec 21 5pm").
@@ -267,6 +289,24 @@ public enum QuickEventParser {
         return nil
     }
 
+    /// "in 3 hours", "3 hours from now": how far ahead, in seconds (up to a week).
+    private static func relativeTime(in text: String, _ ns: NSString) -> (range: NSRange, seconds: TimeInterval)? {
+        let all = NSRange(location: 0, length: ns.length)
+        for pattern in [Pattern.relative, Pattern.fromNow] {
+            for m in pattern.matches(in: text, range: all) {
+                guard let amount = group(m, 1, ns), let unit = group(m, 2, ns) else { continue }
+                let n: Double
+                if amount.hasPrefix("half") { n = 0.5 }
+                else if amount == "a" || amount == "an" { n = 1 }
+                else if let v = Double(amount) { n = v } else { continue }
+                let seconds = unit.hasPrefix("h") ? n * 3600 : n * 60
+                guard seconds > 0, seconds <= 7 * 86_400 else { continue }
+                return (m.range, seconds)
+            }
+        }
+        return nil
+    }
+
     /// "Jan 20 2027 to Jan 25 2027", "Dec 20-23": the system's date reader returns the first date and
     /// how long the range lasts. Without times it's all day, both ends included.
     private static func dateRange(in text: String, calendar: Calendar) -> (range: NSRange, start: Date, end: Date, isAllDay: Bool)? {
@@ -316,6 +356,8 @@ public enum QuickEventParser {
             out.replaceCharacters(in: r, with: " ")
         }
         var title = (out as String).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // "remind me to charge the laptop" is the to-do "charge the laptop".
+        title = Pattern.reminderPrefix.stringByReplacingMatches(in: title, range: NSRange(location: 0, length: (title as NSString).length), withTemplate: "")
         title = Pattern.emptyQuotes.stringByReplacingMatches(in: title, range: NSRange(location: 0, length: (title as NSString).length), withTemplate: " ")
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         while true {

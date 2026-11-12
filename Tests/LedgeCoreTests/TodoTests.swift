@@ -109,4 +109,13 @@ final class NoteLinksTests: XCTestCase {
         XCTAssertEqual(NoteLinks.first(in: "go https://a.com/b now")?.absoluteString, "https://a.com/b")
         XCTAssertNil(NoteLinks.first(in: "nothing here"))
     }
+
+    func testToDoFromNowHasATimeAndKeepsItsGuess() {
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 11, hour: 10))!
+        let t = TodoInput.parse("remind me to check the oven in 30 min [10m]", now: now)
+        XCTAssertEqual(t.title, "check the oven")
+        XCTAssertTrue(t.dueHasTime) // so an alarm is set
+        XCTAssertEqual(t.minutes, 10)
+        XCTAssertEqual(t.event.start, now.addingTimeInterval(30 * 60))
+    }
 }

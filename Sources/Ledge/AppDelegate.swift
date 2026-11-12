@@ -112,6 +112,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.alert"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.islands.alertEverywhere(.pomodoro(ended: .focus, next: .shortBreak, minutes: 5)) }
         }
+        // Debug only: sample to-dos in Reminders from a JSON file ("remove" takes exactly those out).
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.seedTodos"), object: nil, queue: .main) { note in
+            guard let arg = note.object as? String else { return }
+            MainActor.assumeIsolated {
+                if arg == "remove" { RemindersStore.shared.debugRemoveSeed() }
+                else if arg == "inspect" { RemindersStore.shared.debugInspectNewest() }
+                else { RemindersStore.shared.debugSeed(from: arg) }
+            }
+        }
         // Debug only: `ledge-record <style> <folder>` records an animation for checking.
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.record"), object: nil, queue: .main) { [weak self] note in
             guard let args = (note.object as? String)?.split(separator: "|").map(String.init), args.count == 2 else { return }

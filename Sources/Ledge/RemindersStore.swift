@@ -53,12 +53,17 @@ final class RemindersStore: ObservableObject {
     /// The to-do quick add just saved, softly highlighted for a moment.
     @Published private(set) var justAddedID: String?
 
-    private let store = EKEventStore()
+    let store = EKEventStore()
     private var observer: NSObjectProtocol?
     private var timer: Timer?
     private var justAddedTimer: Timer?
     /// Just ticked off: stays in the list, crossed out, for a moment (with Undo).
     private var lingering: [String: (item: TodoItem, index: Int)] = [:]
+    /// The to-dos marked in progress (also used by the sample to-dos).
+    var inProgressIDs: Set<String> {
+        get { inProgress }
+        set { inProgress = newValue }
+    }
     private var inProgress: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "todoInProgress") ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: "todoInProgress") }
@@ -322,6 +327,153 @@ final class RemindersStore: ObservableObject {
         do { try store.remove(r, commit: true) }
         catch { LedgeLog.shared.write("reminders: undo failed: \(error.localizedDescription)") }
         refresh()
+    }
+}
+
+// MARK: - Debug: sample to-dos
+
+/// Debug only: fills Reminders with sample to-dos from a JSON file (and takes exactly those out
+/// again). Every reminder and list it makes is remembered, so removing never touches anything else.
+extension RemindersStore {
+    private static let seededKey = "debugSeededReminders"
+    private static let seededListsKey = "debugSeededLists"
+
+    private struct Seed: Decodable {
+        struct List: Decodable { var title: String; var color: String? }
+        struct Todo: Decodable {
+            var list: String
+            var title: String
+            var minutes: Int?
+            var must: Bool?
+            /// "+0" today, "-1" yesterday, "+2 08:00", or "2027-01-10".
+            var due: String?
+            var notes: String?
+            var inProgress: Bool?
+            var done: Bool?
+        }
+        var lists: [List]
+        var todos: [Todo]
+    }
+
+    func debugSeed(from path: String) {
+        guard access == .granted else { LedgeLog.shared.write("seed: no Reminders access"); return }
+        guard let data = FileManager.default.contents(atPath: path),
+              let seed = try? JSONDecoder().decode(Seed.self, from: data) else {
+            LedgeLog.shared.write("seed: couldn't read \(path)"); return
+        }
+        let d = UserDefaults.standard
+        var made = d.stringArray(forKey: Self.seededKey) ?? []
+        var madeLists = d.stringArray(forKey: Self.seededListsKey) ?? []
+        var lists: [String: EKCalendar] = [:]
+        for l in seed.lists {
+            // An existing list with the same name (any case) is used as it is.
+            if let existing = store.calendars(for: .reminder).first(where: { $0.title.lowercased() == l.title.lowercased() }) {
+                lists[l.title] = existing
+                continue
+            }
+            guard let base = store.defaultCalendarForNewReminders() else { continue }
+            let list = EKCalendar(for: .reminder, eventStore: store)
+            list.title = l.title
+            list.source = base.source
+            if let hex = l.color.flatMap(Self.color(hex:)) { list.cgColor = hex }
+            do {
+                try store.saveCalendar(list, commit: true)
+                lists[l.title] = list
+                madeLists.append(list.calendarIdentifier)
+            } catch { LedgeLog.shared.write("seed: list \(l.title) failed: \(error.localizedDescription)") }
+        }
+        let cal = Calendar.current
+        var progress = inProgressIDs
+        for t in seed.todos {
+            guard let list = lists[t.list] else { continue }
+            let r = EKReminder(eventStore: store)
+            r.calendar = list
+            r.title = TodoTitle.join(t.title, minutes: t.minutes)
+            if t.must == true { r.priority = 1 }
+            if let notes = t.notes { r.notes = notes }
+            if let due = t.due, let (date, hasTime) = Self.dueDate(due, calendar: cal) {
+                let parts: Set<Calendar.Component> = hasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
+                r.dueDateComponents = cal.dateComponents(parts, from: date)
+            }
+            if t.done == true { r.isCompleted = true }
+            do {
+                try store.save(r, commit: false)
+                made.append(r.calendarItemIdentifier)
+                if t.inProgress == true { progress.insert(r.calendarItemIdentifier) }
+            } catch { LedgeLog.shared.write("seed: \(t.title) failed: \(error.localizedDescription)") }
+        }
+        do { try store.commit() } catch { LedgeLog.shared.write("seed: saving failed: \(error.localizedDescription)") }
+        inProgressIDs = progress
+        d.set(made, forKey: Self.seededKey)
+        d.set(madeLists, forKey: Self.seededListsKey)
+        LedgeLog.shared.write("seed: added \(seed.todos.count) sample to-dos")
+        refresh()
+    }
+
+    /// Debug only: writes the newest few reminders, with their due dates and alarms, to the log.
+    func debugInspectNewest() {
+        store.fetchReminders(matching: store.predicateForReminders(in: nil)) { found in
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd HH:mm:ss"
+            let newest = (found ?? []).sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }.prefix(4)
+            for r in newest {
+                let due = r.dueDateComponents.flatMap { Calendar.current.date(from: $0) }.map(f.string(from:)) ?? "none"
+                let alarms = (r.alarms ?? []).map { a in a.absoluteDate.map(f.string(from:)) ?? "relative \(a.relativeOffset)s" }
+                LedgeLog.shared.write("inspect: '\(r.title ?? "")' created \(r.creationDate.map(f.string(from:)) ?? "?") due \(due) alarms \(alarms) done \(r.isCompleted)")
+            }
+        }
+    }
+
+    /// Takes out exactly the sample to-dos (and the lists made for them, once they're empty).
+    func debugRemoveSeed() {
+        let d = UserDefaults.standard
+        let made = d.stringArray(forKey: Self.seededKey) ?? []
+        for id in made {
+            if let r = store.calendarItem(withIdentifier: id) as? EKReminder { try? store.remove(r, commit: false) }
+        }
+        try? store.commit()
+        for id in d.stringArray(forKey: Self.seededListsKey) ?? [] {
+            guard let list = store.calendar(withIdentifier: id) else { continue }
+            let predicate = store.predicateForReminders(in: [list])
+            store.fetchReminders(matching: predicate) { [weak self] found in
+                DispatchQueue.main.async {
+                    guard let self, (found ?? []).isEmpty else { return }
+                    try? self.store.removeCalendar(list, commit: true)
+                }
+            }
+        }
+        inProgressIDs = inProgressIDs.subtracting(made)
+        d.removeObject(forKey: Self.seededKey)
+        d.removeObject(forKey: Self.seededListsKey)
+        LedgeLog.shared.write("seed: removed \(made.count) sample to-dos")
+        refresh()
+    }
+
+    private static func dueDate(_ text: String, calendar cal: Calendar) -> (Date, Bool)? {
+        let parts = text.split(separator: " ")
+        guard let first = parts.first else { return nil }
+        var day: Date
+        if first.hasPrefix("+") || first.hasPrefix("-"), let n = Int(first) {
+            day = cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date())) ?? Date()
+        } else {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            guard let d = f.date(from: String(first)) else { return nil }
+            day = d
+        }
+        guard parts.count > 1 else { return (day, false) }
+        let hm = parts[1].split(separator: ":").compactMap { Int($0) }
+        guard hm.count == 2 else { return (day, false) }
+        day = cal.date(bySettingHour: hm[0], minute: hm[1], second: 0, of: day) ?? day
+        return (day, true)
+    }
+
+    private static func color(hex: String) -> CGColor? {
+        var s = hex
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        return CGColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                       blue: CGFloat(v & 0xFF) / 255, alpha: 1)
     }
 }
 
