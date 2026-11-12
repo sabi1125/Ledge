@@ -11,6 +11,8 @@ enum Theme {
     static let quick = Animation.spring(response: 0.3, dampingFraction: 0.86)
     /// Indicators popping down out of the notch: quick, and stopping exactly at their size.
     static let pop = Animation.spring(response: 0.32, dampingFraction: 1, blendDuration: 0)
+    /// The island closing, in every style: a quick ease-out that lands exactly on its size.
+    static let close = Animation.timingCurve(0.25, 0.1, 0.25, 1, duration: 0.3)
     /// The open island changing size (e.g. into Notes): one smooth move, no bounce, no overshoot.
     static let resize = Animation.spring(response: 0.38, dampingFraction: 1)
     /// The level bar following key presses: smooth, no overshoot.
@@ -97,10 +99,12 @@ enum IslandAnimation: String, CaseIterable, Identifiable {
         switch self {
         case .morph: return growing ? .spring(response: 0.5, dampingFraction: 0.72)
                                     : .spring(response: 0.34, dampingFraction: 1)
+        // Closing is one continuous motion in every style: width and height shrink together,
+        // with at most a slight lead (a pause between them reads as shrinking twice).
         case .drop: return growing ? .spring(response: 0.36, dampingFraction: 0.85).delay(0.12)
                                    : .spring(response: 0.3, dampingFraction: 1)
         case .stretch: return growing ? .spring(response: 0.32, dampingFraction: 0.8)
-                                      : .spring(response: 0.3, dampingFraction: 1).delay(0.12)
+                                      : .spring(response: 0.32, dampingFraction: 1).delay(0.03)
         case .calm: return growing ? .smooth(duration: 0.28) : .smooth(duration: 0.24)
         }
     }
@@ -111,9 +115,9 @@ enum IslandAnimation: String, CaseIterable, Identifiable {
         case .morph: return growing ? .spring(response: 0.45, dampingFraction: 1)
                                     : .spring(response: 0.34, dampingFraction: 1)
         case .drop: return growing ? .spring(response: 0.36, dampingFraction: 1)
-                                   : .spring(response: 0.3, dampingFraction: 1).delay(0.12)
+                                   : .spring(response: 0.32, dampingFraction: 1).delay(0.03)
         case .stretch: return growing ? .spring(response: 0.36, dampingFraction: 1).delay(0.1)
-                                      : .spring(response: 0.26, dampingFraction: 1)
+                                      : .spring(response: 0.3, dampingFraction: 1)
         case .calm: return growing ? .smooth(duration: 0.28) : .smooth(duration: 0.24)
         }
     }

@@ -155,6 +155,13 @@ struct IslandRootView: View {
         // shrinks one way and then grows the other.
         var widthAnimation = resize ? Theme.resize : (isHUD ? Theme.pop : style.width(growing: growing)).delay(lead)
         var heightAnimation = resize ? Theme.resize : (isHUD ? Theme.pop : style.height(growing: growing)).delay(lead)
+        // Closing (back to the pill, the music view or the notch): one plain ease-out in every style,
+        // width and height together. A curve, not a spring, so it can't go past the size it's
+        // heading for and come back (that read as shrinking twice).
+        if !growing && !resize && !isHUD {
+            widthAnimation = Theme.close.delay(lead)
+            heightAnimation = Theme.close.delay(lead)
+        }
         // A small change of target while the island is still moving (e.g. closing heads for the
         // hover bump, then the pointer turns out to be elsewhere and it settles to the notch size).
         // Springs keep their speed when retargeted: a fast-closing island would shoot through the
@@ -723,4 +730,5 @@ extension EnvironmentValues {
         set { self[IsTwinWindowKey.self] = newValue }
     }
 }
+
 
