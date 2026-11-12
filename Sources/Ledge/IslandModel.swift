@@ -146,6 +146,7 @@ final class IslandModel: ObservableObject {
     /// ⌘L from anywhere: opens the island where you left off, or closes it when it's open.
     /// On the Notes page the cursor goes straight into the note.
     func toggleFromShortcut() {
+        if isNoteEnlarged { closeEnlargedNote(); return }
         if isShowingSettings { closeSettings(); return }
         if isExpanded { close(); return }
         expand(force: true)
@@ -180,8 +181,75 @@ final class IslandModel: ObservableObject {
         recompute()
     }
 
+    // MARK: Enlarged note
+
+    /// The open note is enlarged: shown on its own in a big card in the middle of the screen,
+    /// while the island steps aside into the notch.
+    @Published private(set) var isNoteEnlarged = false
+    /// The card is on its way back up into the island (the island reappears when it arrives).
+    private(set) var isReturningNote = false
+
+    enum NoteEnlargeChange { case open, backToIsland, close }
+    /// The enlarged note's card: grow out of the island, go back into it, or just close.
+    var onNoteEnlarged: ((NoteEnlargeChange) -> Void)?
+
+    /// Until when the island jumps to its new shape instead of animating (the card covers it).
+    private(set) var snapUntil = Date.distantPast
+
+    /// The expand button or ⌘E on the Notes page: the note grows out of the island into the
+    /// middle of the screen.
+    func enlargeNote() {
+        guard isExpanded, page == .notes, !isNoteEnlarged else { return }
+        LedgeLog.shared.write("notes: enlarged")
+        isNoteEnlarged = true
+        // The card starts exactly where the open island is, so the island just steps aside
+        // underneath it (no closing animation of its own). Not `close()`: you're still typing.
+        snapUntil = Date().addingTimeInterval(0.1)
+        onNoteEnlarged?(.open)
+        isExpanded = false
+        recompute()
+        notesWantsCursor = true
+        beginNotesTyping()
+    }
+
+    /// Esc, ⌘E or the shrink button: the card shrinks back up into the island, which then opens
+    /// on the note at its normal size (see `finishReturningNote`).
+    func shrinkNote() {
+        guard isNoteEnlarged else { return }
+        LedgeLog.shared.write("notes: back to the island")
+        isNoteEnlarged = false
+        isReturningNote = true
+        onNoteEnlarged?(.backToIsland)
+    }
+
+    /// The card has reached the island's shape: the island takes over, open on the note.
+    func finishReturningNote() {
+        guard isReturningNote else { return }
+        isReturningNote = false
+        snapUntil = Date().addingTimeInterval(0.1)
+        if pages.contains(.notes) { page = .notes }
+        isExpanded = true
+        recompute()
+        onOpen?()
+        notesWantsCursor = true
+        beginNotesTyping()
+    }
+
+    /// A click outside (or another way of leaving): the enlarged note closes all the way.
+    func closeEnlargedNote() {
+        guard isNoteEnlarged else { return }
+        LedgeLog.shared.write("notes: enlarged note closed")
+        isNoteEnlarged = false
+        onNoteEnlarged?(.close)
+        isTyping = false
+        onEndTyping?()
+        recompute()
+    }
+
     func clicked() {
         guard !isShowingSettings else { return } // settings has its own close button
+        // The island while the note is enlarged: the note comes back into it.
+        if isNoteEnlarged { shrinkNote(); return }
         if isExpanded {
             // Clicks inside the open island never close it; a click outside does (see the controller).
             return
@@ -262,6 +330,7 @@ final class IslandModel: ObservableObject {
     /// ⌃⌥E / ⌃⌥T from anywhere: opens the island on the Calendar page, straight into quick add
     /// for an event or a to-do.
     func openQuickAdd(_ kind: CalendarMode) {
+        closeEnlargedNote()
         guard pages.contains(.calendar) else { return }
         if isShowingSettings { closeSettings() }
         if isQuickAdding {
@@ -357,6 +426,7 @@ final class IslandModel: ObservableObject {
     }
 
     func openSettings() {
+        closeEnlargedNote()
         guard !isShowingSettings else { return }
         isQuickAdding = false
         openTodoID = nil
@@ -443,6 +513,8 @@ final class IslandModel: ObservableObject {
     var pages: [IslandPage] { IslandPage.available(enabled: Pref.enabledPages, hasMedia: hasMedia) }
 
     private func expand(force: Bool = false) {
+        // While the note is enlarged (or on its way back), hovering the notch doesn't open a second copy.
+        guard !isNoteEnlarged, !isReturningNote else { return }
         guard force || isHovering || !Pref.bool(Pref.openOnHover) else { return }
         guard !isExpanded, !pages.isEmpty else { return }
         // Always open where you left off: the same page, and quick add or the to-do you had open.

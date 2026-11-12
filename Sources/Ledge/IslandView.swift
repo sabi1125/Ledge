@@ -128,6 +128,18 @@ struct IslandRootView: View {
             didAppear = true
             return
         }
+        // The enlarged note's card covers the island while it changes: jump straight there.
+        if Date() < model.snapUntil {
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) {
+                width = new.width; height = new.height
+                bottomRadius = new.bottomRadius; topRadius = new.topRadius; shoulder = new.shoulder
+                tracksWidth = false; tracksHeight = false
+            }
+            lastMove = .distantPast
+            return
+        }
         if IslandRootView.logMoves {
             LedgeLog.shared.write("move: \(model.style == .notch ? "notch" : "pill") \(Int(old.width))x\(Int(old.height)) -> \(Int(new.width))x\(Int(new.height)) shape \(model.shape)")
         }

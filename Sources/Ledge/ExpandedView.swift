@@ -436,6 +436,9 @@ struct JoinButtonStyle: ButtonStyle {
 struct NotesPage: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var model: IslandModel
+    /// Shown on its own in the big panel in the middle of the screen: the note only (no list),
+    /// with a shrink button instead of the expand one.
+    var enlarged = false
     @Environment(\.isVisiblePage) private var visible
     @FocusState private var focus: Field?
     /// Delete was clicked once; a second click within 3 seconds deletes.
@@ -457,7 +460,18 @@ struct NotesPage: View {
     /// A floating pill has two windows (the normal one and its full-screen twin), each with its own
     /// copy of this page. Only the copy on screen takes the cursor and starts or ends typing;
     /// otherwise the hidden copy takes the keyboard from the one you're looking at.
-    private var inShowingWindow: Bool { isTwinWindow == model.twinIsShowing }
+    /// The enlarged copy counts only while the note is enlarged, and the island's copies only while
+    /// it isn't: the copy going away must not end typing that the other one has just taken over.
+    private var inShowingWindow: Bool {
+        enlarged ? model.isNoteEnlarged : (!model.isNoteEnlarged && isTwinWindow == model.twinIsShowing)
+    }
+    /// The macOS text boxes are only swapped in once the island stops moving. The enlarged panel
+    /// doesn't move with the island, so its boxes are there right away.
+    private var settled: Bool { enlarged ? enlargedReady : model.isSettled }
+    /// The enlarged panel's text boxes come a moment after it takes the keyboard: macOS gives a
+    /// new key window's first text field the cursor with everything selected, so the title would
+    /// be replaced by the first key you type.
+    @State private var enlargedReady = false
 
     var body: some View {
         Group {
@@ -470,7 +484,7 @@ struct NotesPage: View {
                 Message(title: "Couldn't reach Notes", detail: why, button: "Try again") { notes.refresh() }
             case .loading, .ready:
                 HStack(alignment: .top, spacing: 14) {
-                    if showsList {
+                    if showsList && !enlarged {
                         list.frame(width: 168).transition(.opacity)
                         Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1).transition(.opacity)
                     }
@@ -483,7 +497,12 @@ struct NotesPage: View {
         .padding(.horizontal, 18)
         .padding(.top, 4)
         .padding(.bottom, 14)
-        .onAppear { if visible { notes.refresh() } }
+        .onAppear {
+            if visible { notes.refresh() }
+            if enlarged {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { enlargedReady = true }
+            }
+        }
         .onChange(of: visible) { _, now in
             guard now else { return }
             notes.refresh()
@@ -526,7 +545,11 @@ struct NotesPage: View {
 
     /// ⌘L or ⌘1–⌘4 asked for the cursor in the note: take it, once this page is the one showing.
     private func takeCursorIfAsked() {
-        guard model.notesWantsCursor, visible, inShowingWindow else { return }
+        guard model.notesWantsCursor else { return }
+        if IslandRootView.logMoves {
+            LedgeLog.shared.write("notes: cursor asked (enlarged copy \(enlarged), twin \(isTwinWindow), showing \(inShowingWindow), visible \(visible), settled \(settled))")
+        }
+        guard visible, inShowingWindow else { return }
         model.notesWantsCursor = false
         wantsBodyFocus = true
     }
@@ -633,17 +656,19 @@ struct NotesPage: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .center, spacing: 10) {
-                    Button { showsList.toggle() } label: {
-                        Image(systemName: "sidebar.left")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(showsList ? Color(white: 0.85) : Theme.secondaryText)
-                            .frame(width: 20, height: 19)
-                            .contentShape(Rectangle())
+                    if !enlarged {
+                        Button { showsList.toggle() } label: {
+                            Image(systemName: "sidebar.left")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(showsList ? Color(white: 0.85) : Theme.secondaryText)
+                                .frame(width: 20, height: 19)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(showsList ? "Hide the list (⌥⌘S)" : "Show the list (⌥⌘S)")
                     }
-                    .buttonStyle(.plain)
-                    .help(showsList ? "Hide the list (⌥⌘S)" : "Show the list (⌥⌘S)")
                     Group {
-                        if model.isSettled {
+                        if settled {
                             TextField("", text: $notes.title, prompt: Text("Title").foregroundStyle(Color(white: 0.42)))
                                 .textFieldStyle(.plain)
                                 .foregroundStyle(.white)
@@ -660,15 +685,27 @@ struct NotesPage: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: enlarged ? 20 : 15, weight: .semibold))
                     deleteButton
                     OpenInAppButton(color: Theme.notesYellow, help: "Open in Notes") {
                         notes.openInNotes()
-                        model.closeForHandOff()
+                        if enlarged { model.closeEnlargedNote() } else { model.closeForHandOff() }
                     }
+                    // Enlarge: the note moves to the middle of the screen (⌘E); shrink brings it back.
+                    Button { enlarged ? model.shrinkNote() : model.enlargeNote() } label: {
+                        Image(systemName: enlarged ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(Color(white: 0.85))
+                            .frame(width: 20, height: 19)
+                            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white.opacity(0.1)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(enlarged ? "Back to the island (Esc or ⌘E)" : "Enlarge (⌘E)")
                 }
+                .padding(.bottom, enlarged ? 6 : 0)
                 ZStack(alignment: .topLeading) {
-                    if model.isSettled {
+                    if settled {
                         // Markdown is styled as you type: "## Plan" big, "**x**" bold, "---" a line.
                         MarkdownEditor(text: $notes.text, wantsFocus: wantsBodyFocus, blurRequest: bodyBlurRequest) { now in
                             bodyFocused = now
@@ -689,6 +726,64 @@ struct NotesPage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+/// Where the enlarged note's card is, in its window's coordinates (top left origin): `from` is
+/// the open island it grows out of, `to` the card in the middle of the screen.
+@MainActor
+final class EnlargeMotion: ObservableObject {
+    @Published var expanded = false
+    @Published var from: CGRect = .zero
+    @Published var to: CGRect = .zero
+    /// The island's corners at the start: square at the top on the notch (it runs into the
+    /// screen edge), rounded all round for the floating pill.
+    var fromTopRadius: CGFloat = 0
+    var fromBottomRadius: CGFloat = 30
+    /// One motion out of the island and back, whatever the island's animation style.
+    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.9)
+}
+
+/// The enlarged note: the Notes page on its own (no list) on a big black card in the middle of
+/// the screen. The card grows out of the open island: the black shape moves and grows, while
+/// the note inside is laid out at its final place from the start and only fades in, so nothing
+/// slides, zooms or reflows.
+struct EnlargedNoteView: View {
+    @ObservedObject var model: IslandModel
+    @ObservedObject var notes: NotesStore
+    @ObservedObject var motion: EnlargeMotion
+
+    var body: some View {
+        let r = motion.expanded ? motion.to : motion.from
+        let top = motion.expanded ? 26 : motion.fromTopRadius
+        let bottom = motion.expanded ? 26 : motion.fromBottomRadius
+        let card = UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom,
+                                          bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous)
+        ZStack(alignment: .topLeading) {
+            // The clear space around the card counts as "outside": a click there closes it too.
+            Color.black.opacity(0.001)
+                .onTapGesture { model.closeEnlargedNote() }
+            card.fill(Color.black)
+                .frame(width: r.width, height: r.height)
+                .shadow(color: .black.opacity(motion.expanded ? 0.5 : 0), radius: 26, y: 12)
+                .offset(x: r.minX, y: r.minY)
+            NotesPage(notes: notes, model: model, enlarged: true)
+                .padding(.top, 18)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+                .frame(width: motion.to.width, height: motion.to.height, alignment: .topLeading)
+                .offset(x: motion.to.minX, y: motion.to.minY)
+                // In once the card is nearly there; out first on the way back.
+                .opacity(motion.expanded ? 1 : 0)
+                .animation(motion.expanded ? .easeOut(duration: 0.22).delay(0.17) : .easeOut(duration: 0.1),
+                           value: motion.expanded)
+                .mask(alignment: .topLeading) {
+                    card.frame(width: r.width, height: r.height).offset(x: r.minX, y: r.minY)
+                }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(EnlargeMotion.spring, value: motion.expanded)
+        .environment(\.colorScheme, .dark)
     }
 }
 

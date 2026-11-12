@@ -732,7 +732,7 @@ final class MarkdownTextView: NSTextView {
             // copy on the other desktop grabs the keyboard from the one you're looking at, and
             // typing ends straight away (a full-screen browser, Teams or Claude on that screen).
             guard window.isOnActiveSpace, !self.isHiddenOrHasHiddenAncestor else {
-                LedgeLog.shared.write("notes: skipped the cursor in a copy of the island that isn't showing")
+                LedgeLog.shared.write("notes: skipped the cursor in a copy of the island that isn't showing (window \(window.windowNumber), on active space \(window.isOnActiveSpace), hidden \(self.isHiddenOrHasHiddenAncestor), visible \(window.isVisible), alpha \(window.alphaValue))")
                 return
             }
             // The cursor only takes typing in the window that has the keyboard. The island asked

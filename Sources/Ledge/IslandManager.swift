@@ -170,6 +170,7 @@ final class IslandManager {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: action)
         }
         func reset(page: IslandPage?, then: @escaping () -> Void) {
+            m.closeEnlargedNote()
             m.closeSettings()
             m.close()
             if let page { m.debugSetPage(page) }
@@ -205,6 +206,18 @@ final class IslandManager {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { record { m.closeSettings() } }
         }
         case "hud": reset(page: nil) { record(2.2) { m.show(.volume(level: 0.62, muted: false)) } }
+        case "enlarge": opened(page: .notes) {
+            m.enlargeNote()
+            c.recordFrames(to: dir + "-card", seconds: 0.9, every: 0.03, note: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { c.debugCaptureNote(to: dir + "-note.png") }
+        }
+        case "shrink": opened(page: .notes) {
+            m.enlargeNote()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                c.recordFrames(to: dir + "-card", seconds: 0.6, every: 0.03, note: true)
+                record { m.shrinkNote() }
+            }
+        }
         default: break
         }
     }

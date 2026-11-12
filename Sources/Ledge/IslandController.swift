@@ -52,6 +52,8 @@ final class IslandController {
     let updater: Updater
     private var panel: IslandPanel?
     private var revealPanel: IslandPanel?
+    /// The enlarged note: a big panel in the middle of this screen (made the first time it's used).
+    private var notePanel: IslandPanel?
     /// The resting island (the notch, or the idle pill), in global screen coordinates.
     private var anchorRect: NSRect = .zero
     private var screenTop: CGFloat = 0
@@ -102,11 +104,156 @@ final class IslandController {
         model.onSettingsShown = { [weak self] shown in
             if shown { self?.takeKeyboard() } else { self?.giveBackFocus() }
         }
+        // The enlarged note's panel comes and goes with the model.
+        model.onNoteEnlarged = { [weak self] change in
+            switch change {
+            case .open: self?.showNotePanel()
+            case .backToIsland: self?.returnNoteToIsland()
+            case .close: self?.hideNotePanel()
+            }
+        }
+    }
+
+    // MARK: Enlarged note
+
+    private let enlargeMotion = EnlargeMotion()
+    /// Room around the card for its shadow.
+    private let noteMargin: CGFloat = 50
+
+    /// The open island on the Notes page, in screen coordinates: where the card starts and ends.
+    private func islandNotesRect() -> NSRect {
+        let size = IslandLayout.size(for: .expandedNotes, notch: model.notch, style: model.style)
+        let top = screenTop - IslandLayout.topGap(style: model.style)
+        return NSRect(x: anchorRect.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    }
+
+    /// The card in the middle of this screen: about 60% × 70% of it, at most 1000 × 720.
+    private func noteCardRect() -> NSRect? {
+        guard let screen = NSScreen.screens.first(where: { Self.displayID(of: $0) == displayID }) else { return nil }
+        let area = screen.visibleFrame
+        let size = CGSize(width: min(1000, area.width * 0.6), height: min(720, area.height * 0.7))
+        return NSRect(x: (area.midX - size.width / 2).rounded(), y: (area.midY - size.height / 2).rounded(),
+                      width: size.width, height: size.height)
+    }
+
+    /// Big enough for the card's whole trip (island to middle), clipped to the screen's top.
+    private func travelFrame(_ from: NSRect, _ to: NSRect) -> NSRect {
+        var f = from.union(to).insetBy(dx: -noteMargin, dy: -noteMargin)
+        f.size.height = min(f.maxY, screenTop) - f.minY
+        return f
+    }
+
+    /// Moves the panel and tells the card where the island and the middle are in it, in one go.
+    private func place(_ p: IslandPanel, frame: NSRect, from: NSRect, to: NSRect) {
+        func local(_ r: NSRect) -> CGRect { CGRect(x: r.minX - frame.minX, y: frame.maxY - r.maxY, width: r.width, height: r.height) }
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            enlargeMotion.from = local(from)
+            enlargeMotion.to = local(to)
+        }
+        p.disableScreenUpdatesUntilFlush()
+        p.setFrame(frame, display: true)
+    }
+
+    /// The card appears exactly over the open island, then grows into the middle of the screen.
+    private func showNotePanel() {
+        guard let to = noteCardRect() else { return }
+        let from = islandNotesRect()
+        let p = notePanel ?? makeNotePanel()
+        notePanel = p
+        enlargeMotion.fromTopRadius = model.style == .notch ? 0 : IslandLayout.topRadius(for: .expandedNotes, notch: model.notch, style: model.style)
+        enlargeMotion.fromBottomRadius = IslandLayout.bottomRadius(for: .expandedNotes, notch: model.notch, style: model.style)
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { enlargeMotion.expanded = false }
+        // Fresh contents each time (the text boxes start out of the way, see `NotesPage`).
+        let host = FirstMouseHostingView(rootView: EnlargedNoteView(model: model, notes: notes, motion: enlargeMotion))
+        // The panel's size is ours: SwiftUI must not resize the window to fit the note's text.
+        host.sizingOptions = []
+        host.autoresizingMask = [.width, .height]
+        p.contentView = host
+        let frame = travelFrame(from, to)
+        place(p, frame: frame, from: from, to: to)
+        host.frame = NSRect(origin: .zero, size: frame.size)
+        p.alphaValue = 1
+        p.orderFrontRegardless()
+        // Next turn, once it's on screen at the island's shape: grow.
+        DispatchQueue.main.async { [weak self] in self?.enlargeMotion.expanded = true }
+        // Arrived: the window shrinks to the card, so the rest of the screen (the menu bar too)
+        // takes clicks normally again.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.model.isNoteEnlarged, let p = self.notePanel else { return }
+            self.place(p, frame: to.insetBy(dx: -self.noteMargin, dy: -self.noteMargin), from: from, to: to)
+        }
+        takeKeyboard()
+    }
+
+    /// Esc, ⌘E or shrink: the note fades, the card shrinks back up into the island's shape, and
+    /// the island takes over right there.
+    private func returnNoteToIsland() {
+        guard let p = notePanel, let to = noteCardRect() else { model.finishReturningNote(); return }
+        let from = islandNotesRect()
+        place(p, frame: travelFrame(from, to), from: from, to: to)
+        enlargeMotion.expanded = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self] in
+            guard let self else { return }
+            self.model.finishReturningNote()
+            // A moment later, so the island is drawn before the card goes.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard !self.model.isNoteEnlarged, let p = self.notePanel else { return }
+                p.orderOut(nil)
+                p.contentView = nil
+            }
+        }
+    }
+
+    /// Debug only: saves the enlarged note's panel as an image.
+    func debugCaptureNote(to path: String) {
+        guard let view = notePanel?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    private func hideNotePanel() {
+        guard let p = notePanel, p.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.16
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            p.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // Unless it was enlarged again meanwhile.
+                if self?.model.isNoteEnlarged != true {
+                    p.orderOut(nil)
+                    p.contentView = nil // saved when the page goes; nothing left running
+                }
+            }
+        })
+    }
+
+    private func makeNotePanel() -> IslandPanel {
+        let p = IslandPanel(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        p.ignoresMouseEvents = false
+        p.allowsKey = { true }
+        // Same level as the island: the card starts right over it (and the menu bar).
+        p.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
+        // On whichever desktop you're on, full-screen ones included.
+        p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
+        // Another app taking over (a click elsewhere, ⌘Tab) closes it, like the island.
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.model.isNoteEnlarged, !NSApp.isActive || NSApp.keyWindow == nil else { return }
+                LedgeLog.shared.write("notes: enlarged note lost the keyboard")
+                self.model.closeEnlargedNote()
+            }
+        }
+        return p
     }
 
     /// Debug only: saves the island as images every few milliseconds, to check animations.
-    func recordFrames(to dir: String, seconds: TimeInterval = 2.4, every interval: TimeInterval = 0.04) {
-        guard let view = panel?.contentView else { LedgeLog.shared.write("record: no panel"); return }
+    func recordFrames(to dir: String, seconds: TimeInterval = 2.4, every interval: TimeInterval = 0.04, note: Bool = false) {
+        guard let view = (note ? notePanel : panel)?.contentView else { LedgeLog.shared.write("record: no panel"); return }
         do { try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true) }
         catch { LedgeLog.shared.write("record: can't make \(dir): \(error.localizedDescription)") }
         let start = Date()
@@ -134,6 +281,8 @@ final class IslandController {
     @discardableResult
     private func handleEscape() -> Bool {
         let m = model
+        // The enlarged note goes back into the island, at its normal size.
+        if m.isNoteEnlarged { m.shrinkNote(); return true }
         if m.isShowingSettings { m.closeSettings(); return true }
         if m.isQuickAdding {
             if m.quickAddSuggestsLists && !m.quickAddShowsNotes && !m.quickAddIsConfirming {
@@ -284,7 +433,7 @@ final class IslandController {
         }
         // ⌘N makes a new note while the island is open on the Notes page (taken from other apps
         // only during that time, like ⌘T on the to-do list).
-        let wantsNewNote = m.isExpanded && m.page == .notes && !m.isShowingSettings
+        let wantsNewNote = (m.isExpanded && m.page == .notes || m.isNoteEnlarged) && !m.isShowingSettings
         if wantsNewNote, newNoteHotKey == nil {
             newNoteHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 3000 + displayID % 1000) { [weak self] in
                 guard let self else { return }
@@ -308,7 +457,7 @@ final class IslandController {
         }
         // Esc while an island is open: it closes or steps back even when you only hovered it
         // open (and it doesn't have the keyboard). Taken from other apps only while it's open.
-        let wantsEscape = m.isExpanded || m.isShowingSettings
+        let wantsEscape = m.isExpanded || m.isShowingSettings || m.isNoteEnlarged
         if wantsEscape, escapeHotKey == nil {
             escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0, id: 2000 + displayID % 1000) { [weak self] in
                 _ = self?.handleEscape()
@@ -324,7 +473,9 @@ final class IslandController {
     /// Takes the keyboard: Ledge becomes the active app (remembering the one you were in) and
     /// the island's window becomes the key window.
     private func takeKeyboard() {
-        guard let panel = activePanel ?? panel else { return }
+        // The enlarged note's panel while it's showing, otherwise the island's window.
+        let target = model.isNoteEnlarged ? notePanel : (activePanel ?? panel)
+        guard let panel = target else { return }
         if !NSApp.isActive {
             let front = NSWorkspace.shared.frontmostApplication
             if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
@@ -452,6 +603,8 @@ final class IslandController {
         // Clicking anywhere else ends typing, and the island closes.
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                // The enlarged note took the keyboard from the island: typing goes on there.
+                if self?.model.isNoteEnlarged == true { return }
                 if self?.model.isTyping == true { LedgeLog.shared.write("keys: island window lost the keyboard") }
                 self?.model.isTyping = false
             }
@@ -549,7 +702,7 @@ final class IslandController {
             // window, so islands on other screens never take them.
             let mine = MainActor.assumeIsolated { () -> Bool in
                 guard let self, let window = e.window else { return false }
-                return window === self.panel || window === self.revealPanel
+                return window === self.panel || window === self.revealPanel || window === self.notePanel
             }
             guard mine else { return e }
             // Copy, paste, cut, select all, undo and redo while typing. Ledge has no Edit menu (it
@@ -560,10 +713,21 @@ final class IslandController {
                 return responder.tryToPerform(action, with: nil)
             }
             if edited { return nil }
+            // ⌘E on the Notes page: enlarge the note, or bring it back into the island.
+            let enlargeKeys = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if e.keyCode == 14, enlargeKeys == [.command],
+               MainActor.assumeIsolated({ () -> Bool in
+                   guard let m = self?.model else { return false }
+                   if m.isNoteEnlarged { m.shrinkNote(); return true }
+                   guard m.isExpanded, m.page == .notes else { return false }
+                   m.enlargeNote()
+                   return true
+               }) { return nil }
             // ⌥⌘S on the Notes page shows or hides the list of notes (like the Notes app).
+            // (Not in the enlarged note, which has no list.)
             let sidebarKeys = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if e.keyCode == 1, sidebarKeys == [.command, .option],
-               MainActor.assumeIsolated({ self?.model.page == .notes }) {
+               MainActor.assumeIsolated({ self?.model.page == .notes && self?.model.isNoteEnlarged == false }) {
                 UserDefaults.standard.set(!Pref.bool(Pref.notesSidebar), forKey: Pref.notesSidebar)
                 return nil
             }
@@ -627,7 +791,13 @@ final class IslandController {
         // quick add is kept for next time.)
         if let c = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.hitRect().contains(NSEvent.mouseLocation) else { return }
+                guard let self else { return }
+                // The enlarged note closes on a click anywhere outside it.
+                if self.model.isNoteEnlarged {
+                    if let f = self.notePanel?.frame, !f.contains(NSEvent.mouseLocation) { self.model.closeEnlargedNote() }
+                    return
+                }
+                guard !self.hitRect().contains(NSEvent.mouseLocation) else { return }
                 if self.model.isShowingSettings { self.model.closeSettings() }
                 else if self.model.isExpanded { self.model.close() }
             }
