@@ -59,6 +59,7 @@ final class RemindersStore: ObservableObject {
     private var observer: NSObjectProtocol?
     private var timer: Timer?
     private var justAddedTimer: Timer?
+    private var notesSave: DispatchWorkItem?
     /// Just ticked off: stays in the list, crossed out, for a moment (with Undo).
     private var lingering: [String: (item: TodoItem, index: Int)] = [:]
     /// The to-dos marked in progress (also used by the sample to-dos).
@@ -239,6 +240,22 @@ final class RemindersStore: ObservableObject {
         r.notes = Checklist.toggling(line: line, in: r.notes ?? "")
         if let index = items.firstIndex(where: { $0.id == id }) { items[index].notes = r.notes ?? "" }
         save(r, what: "toggle step")
+    }
+
+    /// Notes typed in an opened to-do: saved to Reminders a moment after you stop typing
+    /// (`now` saves straight away, e.g. when the to-do closes).
+    func updateNotes(_ id: String, to text: String, now: Bool = false) {
+        notesSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let r = self.reminder(id), (r.notes ?? "") != text else { return }
+                r.notes = text.isEmpty ? nil : text
+                if let index = self.items.firstIndex(where: { $0.id == id }) { self.items[index].notes = text }
+                self.save(r, what: "notes")
+            }
+        }
+        notesSave = work
+        if now { work.perform() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work) }
     }
 
     private func save(_ r: EKReminder, what: String) {

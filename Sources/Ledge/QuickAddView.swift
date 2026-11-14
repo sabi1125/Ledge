@@ -23,6 +23,10 @@ struct QuickAddView: View {
     /// The pointer is on the "Added" confirmation: it stays until you move away (to reach its buttons).
     @State private var overConfirmation = false
     @FocusState private var focus: Field?
+    /// The notes box (a Markdown text view, outside `focus`) should take the cursor.
+    @State private var notesWantFocus = false
+    /// Each change takes the cursor out of the notes box.
+    @State private var notesBlur = 0
     /// Esc hid the list suggestions; they come back with the next change to the line.
     @State private var listsHidden = false
     /// The window this copy of quick add is in. The pill on another screen has a hidden twin window
@@ -337,22 +341,17 @@ struct QuickAddView: View {
             .padding(.leading, 2)
             ZStack(alignment: .topLeading) {
                 if model.isSettled {
-                    TextEditor(text: $notes)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.white)
-                        .scrollContentBackground(.hidden)
-                        .scrollIndicators(.never)
-                        .focused($focus, equals: .notes)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 6)
+                    // Markdown drawn as you type, like the Notes page: headings, bold, checkboxes…
+                    MarkdownEditor(text: $notes, wantsFocus: notesWantFocus, blurRequest: notesBlur) { now in
+                        if now { notesWantFocus = false }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                 } else {
-                    // While the island is still moving: plain text (see `IslandModel.isSettled`).
-                    Text(notes)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.white)
+                    // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                    MarkdownPreview(text: notes)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 if notes.isEmpty {
                     Text("Notes · type [] for a checkbox")
@@ -395,6 +394,14 @@ struct QuickAddView: View {
     /// Puts the cursor in a line, at the end of what's there. (macOS selects all the text when a
     /// field gets focus, and the next key would replace it.)
     private func focusLine(_ field: Field) {
+        // The notes box is a Markdown text view: it takes the cursor itself (at the end of the text).
+        if field == .notes {
+            focus = nil
+            notesWantFocus = true
+            return
+        }
+        notesWantFocus = false
+        notesBlur += 1
         focus = field
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(30))

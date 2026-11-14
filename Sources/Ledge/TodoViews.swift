@@ -307,8 +307,11 @@ struct TodoDetail: View {
     @ObservedObject var todos: RemindersStore
     @ObservedObject var model: IslandModel
     var id: String
-    /// How far (pt) the note goes on below what's showing, for the "more…" hint.
-    @State private var hiddenBelow: CGFloat = 0
+    /// The notes as you edit them (saved to Reminders a moment after you stop typing).
+    @State private var text = ""
+    @State private var loaded = false
+    /// Edited here (not just shown): only then is anything saved when the to-do closes.
+    @State private var edited = false
 
     var body: some View {
         let item = todos.items.first { $0.id == id }
@@ -329,6 +332,18 @@ struct TodoDetail: View {
         .padding(.horizontal, 22)
         .padding(.top, 8)
         .padding(.bottom, 14)
+        .onAppear {
+            text = item?.notes ?? ""
+            loaded = true
+        }
+        // A tick or an edit made elsewhere (the Reminders app) shows up here, unless you're typing.
+        .onChange(of: item?.notes ?? "") { _, now in if !edited || now == text { text = now } }
+        .onChange(of: text) { _, now in
+            guard loaded, now != (item?.notes ?? "") else { return }
+            edited = true
+            todos.updateNotes(id, to: now)
+        }
+        .onDisappear { if edited { todos.updateNotes(id, to: text, now: true) } }
     }
 
     private func header(_ item: TodoItem) -> some View {
@@ -371,105 +386,32 @@ struct TodoDetail: View {
         }
     }
 
-    /// The whole note, in order: checkboxes you can tick, bullets, indents and links. Scrolls
-    /// with two fingers (no scroll bar); "more…" shows while there's more below.
+    /// The whole note, drawn as Markdown like the Notes page (headings, bold, quotes, code, links)
+    /// and editable right here: click a checkbox to tick it, or type. "- [ ] step" lines are the
+    /// to-do's steps.
     @ViewBuilder private func steps(_ item: TodoItem) -> some View {
-        let lines = Self.lines(of: item.notes)
-        if lines.allSatisfy({ $0.kind == .blank }) {
-            Text("No notes yet. Lines like “- [ ] step” become checkboxes here.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.secondaryText)
-                .padding(.leading, 2)
-        } else {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(lines) { line in noteLine(line, item: item) }
-                }
-                .padding(.leading, 2)
-                .padding(.bottom, 16) // room to scroll the last line clear of "more…"
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ZStack(alignment: .topLeading) {
+            if model.isSettled {
+                MarkdownEditor(text: $text, wantsFocus: false, blurRequest: 0) { _ in }
+            } else {
+                // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                MarkdownPreview(text: text)
             }
-            .scrollIndicators(.never)
-            .onScrollGeometryChange(for: CGFloat.self) { g in
-                g.contentSize.height - g.containerSize.height - g.contentOffset.y
-            } action: { _, below in
-                hiddenBelow = below
+            if text.isEmpty {
+                Text("No notes yet. Type here; “[] ” makes a checkbox, a step of this to-do.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.secondaryText)
+                    .allowsHitTesting(false)
             }
-            .overlay(alignment: .bottomLeading) {
-                if hiddenBelow > 16 {
-                    Text("more…")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.secondaryText)
-                        .padding(.leading, 2)
-                        .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
-                        .background(Color.black)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.15), value: hiddenBelow > 16)
+        }
+        .padding(.leading, 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // "[] " becomes a checkbox; return on a list line starts the next one.
+        .onChange(of: text) { old, new in
+            if let fixed = Checklist.autoFormat(old: old, new: new) { text = fixed }
         }
     }
 
-    @ViewBuilder private func noteLine(_ line: NoteLine, item: TodoItem) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-            switch line.kind {
-            case .blank:
-                Color.clear.frame(height: 2)
-            case .check(let done):
-                TodoCircle(done: done, inProgress: false, size: 12) {
-                    todos.toggleStep(item.id, line: line.id)
-                }
-                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 4 }
-                NoteText.inline(line.text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(done ? Theme.secondaryText : Color(white: 0.9))
-                    .strikethrough(done)
-            case .bullet:
-                Text("•").font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
-                NoteText.inline(line.text).font(.system(size: 12)).foregroundStyle(Color(white: 0.9))
-            case .heading:
-                NoteText.inline(line.text).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
-            case .text:
-                NoteText.inline(line.text).font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.leading, CGFloat(line.level) * 16)
-    }
-
-    /// One line of a note, read as Markdown.
-    struct NoteLine: Identifiable {
-        enum Kind: Equatable { case blank, check(done: Bool), bullet, heading, text }
-        var id: Int        // the line number (checkboxes are ticked by it)
-        var kind: Kind
-        var text: String
-        var level: Int     // indent: every 4 spaces (or a tab) is one level
-    }
-
-    static func lines(of notes: String) -> [NoteLine] {
-        let checks = Dictionary(uniqueKeysWithValues: Checklist.items(in: notes).map { ($0.line, $0) })
-        return notes.split(separator: "\n", omittingEmptySubsequences: false).enumerated().map { index, raw in
-            let line = String(raw)
-            let leading = line.prefix { $0 == " " || $0 == "\t" }
-            let level = leading.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) } / 4
-            let body = line.dropFirst(leading.count)
-            if body.trimmingCharacters(in: .whitespaces).isEmpty {
-                return NoteLine(id: index, kind: .blank, text: "", level: 0)
-            }
-            if let step = checks[index] {
-                return NoteLine(id: index, kind: .check(done: step.done), text: step.text, level: level)
-            }
-            if body.hasPrefix("- ") || body.hasPrefix("* ") {
-                return NoteLine(id: index, kind: .bullet, text: String(body.dropFirst(2)), level: level)
-            }
-            if body.hasPrefix("#") {
-                return NoteLine(id: index, kind: .heading,
-                                text: body.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces), level: level)
-            }
-            return NoteLine(id: index, kind: .text, text: String(body), level: level)
-        }
-    }
 }
 
 /// One line of notes as inline Markdown: **bold**, `code`, and links shown by name.
