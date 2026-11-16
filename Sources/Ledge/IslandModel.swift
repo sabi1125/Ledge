@@ -181,6 +181,72 @@ final class IslandModel: ObservableObject {
         recompute()
     }
 
+    // MARK: Window switcher
+
+    /// The window switcher, while it's showing: every window, which one is chosen, and how it's drawn.
+    struct SwitcherState: Equatable {
+        var windows: [SwitcherWindow]
+        var selected: Int
+        var style: SwitcherStyle
+        var size: CGSize
+    }
+    @Published private(set) var switcher: SwitcherState?
+    /// Goes up each time new window previews come in (the switcher redraws them).
+    @Published var switcherPreviews = 0
+    /// A window was clicked in the switcher.
+    var onSwitcherPick: (() -> Void)?
+
+    /// Opens the switcher with these windows. Like Windows' Alt+Tab, the one after the window
+    /// you're in is chosen first, so a quick tap flips between your last two.
+    func showSwitcher(_ windows: [SwitcherWindow], style: SwitcherStyle) {
+        closeEnlargedNote()
+        if isShowingSettings { closeSettings() }
+        if isExpanded { close() }
+        let size = SwitcherLayout.size(style: style, count: windows.count, notch: notch, style: self.style)
+        // A switcher is just there the moment you press its keys: no growing out of the notch.
+        snapUntil = Date().addingTimeInterval(0.1)
+        switcher = SwitcherState(windows: windows, selected: windows.count > 1 ? 1 : 0, style: style, size: size)
+        recompute()
+    }
+
+    /// Fresh window titles, once they've been read (the switcher shows first, with last time's).
+    func updateSwitcherTitles(_ titles: [CGWindowID: String]) {
+        guard var s = switcher else { return }
+        var changed = false
+        for i in s.windows.indices {
+            if let t = titles[s.windows[i].id], !t.isEmpty, t != s.windows[i].title {
+                s.windows[i].title = t
+                changed = true
+            }
+        }
+        if changed { switcher = s }
+    }
+
+    func moveSwitcher(by step: Int) {
+        guard var s = switcher, !s.windows.isEmpty else { return }
+        s.selected = (s.selected + step + s.windows.count) % s.windows.count
+        switcher = s
+    }
+
+    /// Clicking a window in the switcher picks it.
+    func pickSwitcher(_ index: Int) {
+        guard var s = switcher, s.windows.indices.contains(index) else { return }
+        s.selected = index
+        switcher = s
+        onSwitcherPick?()
+    }
+
+    /// Closes the switcher; returns the window that was chosen.
+    @discardableResult
+    func endSwitcher() -> SwitcherWindow? {
+        guard let s = switcher else { return nil }
+        // And gone the moment you let go.
+        snapUntil = Date().addingTimeInterval(0.1)
+        switcher = nil
+        recompute()
+        return s.windows.indices.contains(s.selected) ? s.windows[s.selected] : nil
+    }
+
     // MARK: Enlarged note
 
     /// The open note is enlarged: shown on its own in a big card in the middle of the screen,
@@ -513,8 +579,9 @@ final class IslandModel: ObservableObject {
     var pages: [IslandPage] { IslandPage.available(enabled: Pref.enabledPages, hasMedia: hasMedia) }
 
     private func expand(force: Bool = false) {
-        // While the note is enlarged (or on its way back), hovering the notch doesn't open a second copy.
-        guard !isNoteEnlarged, !isReturningNote else { return }
+        // While the note is enlarged (or on its way back), or the switcher shows, hovering the
+        // notch doesn't open the island.
+        guard !isNoteEnlarged, !isReturningNote, switcher == nil else { return }
         guard force || isHovering || !Pref.bool(Pref.openOnHover) else { return }
         guard !isExpanded, !pages.isEmpty else { return }
         // Always open where you left off: the same page, and quick add or the to-do you had open.
@@ -543,7 +610,9 @@ final class IslandModel: ObservableObject {
         if !pages.isEmpty && !pages.contains(page) { page = pages.first! }
         if isExpanded && pages.isEmpty { isExpanded = false }
         let next: IslandShape
-        if isShowingSettings {
+        if switcher != nil {
+            next = .switcher
+        } else if isShowingSettings {
             next = .settings
         } else if isExpanded {
             // Bigger for notes: the Notes page (tallest), a to-do's notes, and quick add notes.
@@ -578,8 +647,8 @@ final class IslandModel: ObservableObject {
         }
         if next.isOpen && next != lastOpenShape { lastOpenShape = next }
         if next != shape {
-            let old = IslandLayout.size(for: shape, notch: notch, style: style, compactWidth: compactWidth)
-            let new = IslandLayout.size(for: next, notch: notch, style: style, compactWidth: compactWidth)
+            let old = IslandLayout.size(for: shape, notch: notch, style: style, compactWidth: compactWidth, switcherSize: switcher?.size)
+            let new = IslandLayout.size(for: next, notch: notch, style: style, compactWidth: compactWidth, switcherSize: switcher?.size)
             growing = new.width * new.height >= old.width * old.height
             let p = NSEvent.mouseLocation
             LedgeLog.shared.write("island: \(shape) -> \(next) page \(page.rawValue) (pointer \(Int(p.x)),\(Int(p.y)) buttons \(NSEvent.pressedMouseButtons) hover \(isHovering) typing \(isTyping) playing \(media.isPlaying))")

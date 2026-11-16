@@ -24,6 +24,10 @@ enum Pref {
     static let pomoLong = "pomoLongMinutes"
     static let pomoSessions = "pomoSessions"
     static let pomoAutoStart = "pomoAutoStart"
+    /// The window switcher: on or off, previews, and every desktop or only this one.
+    static let switcherOn = "switcherOn"
+    static let switcherPreviews = "switcherPreviews"
+    static let switcherAllDesktops = "switcherAllDesktops"
     /// The Notes page shows its list of notes (⌥⌘S or the sidebar button hides it).
     static let notesSidebar = "notesSidebar"
 
@@ -59,6 +63,10 @@ enum Pref {
             pomoSessions: 4,
             pomoAutoStart: true,
             notesSidebar: true,
+            switcherOn: true,
+            switcherPreviews: true,
+            switcherAllDesktops: true,
+            SwitcherStyle.key: SwitcherStyle.strip.rawValue,
         ])
     }
 

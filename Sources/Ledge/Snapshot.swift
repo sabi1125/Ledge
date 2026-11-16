@@ -39,6 +39,7 @@ enum Snapshot {
             ("17-settings-animation", .settings, nil, false, .music),
             ("17-settings-pomodoro", .settings, nil, false, .music),
             ("17-settings-awake", .settings, nil, false, .music),
+            ("17-settings-switcher", .settings, nil, false, .music),
             ("17-settings-general", .settings, nil, false, .music),
             ("f9-pill-settings", .settings, nil, false, .music),
             ("12-timer-page-idle", .expanded, nil, false, .timer),

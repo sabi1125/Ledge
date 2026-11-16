@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var quickEventHotKey: HotKey?
     private var quickTodoHotKey: HotKey?
     private var openHotKey: HotKey?
+    /// The window switcher's shortcut (⌥Tab by default, set in settings).
+    private let switcherKeys = SwitcherKeys()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.registerDefaults()
@@ -95,6 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         keys.start()
+
+        // The window switcher: every window, two Chromes as two, coming out of the notch.
+        WindowCatalog.shared.start()
+        switcherKeys.enabled = { Pref.bool(Pref.switcherOn) }
+        switcherKeys.onAction = { [weak self] action in
+            MainActor.assumeIsolated { self?.islands.switcher(action) ?? false }
+        }
+        islands.onSwitcherClicked = { [weak self] in self?.switcherKeys.reset() }
+        switcherKeys.start()
         if !AXIsProcessTrusted() {
             // Ask once per launch; each new build of Ledge needs a fresh grant.
             let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String

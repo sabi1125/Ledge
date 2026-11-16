@@ -206,6 +206,26 @@ final class IslandManager {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { record { m.closeSettings() } }
         }
         case "hud": reset(page: nil) { record(2.2) { m.show(.volume(level: 0.62, muted: false)) } }
+        case _ where name.hasPrefix("switch") && !name.hasPrefix("switcher"):
+            // "switch" / "switch3": opens the switcher, moves to that window (2nd by default), switches.
+            let steps = Int(name.dropFirst(6)) ?? 2
+            _ = switcher(.open)
+            for _ in 0..<max(0, steps - 2) { _ = switcher(.next) }
+            if let s = switcherIsland?.model.switcher {
+                LedgeLog.shared.write("switcher: list \(s.windows.map(\.appName)), chose \(s.windows[s.selected].appName)")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { _ = self.switcher(.commit) }
+        case _ where name.hasPrefix("switcher-"):
+            // "switcher-strip": open the switcher in that style, step once, then close it.
+            let style = SwitcherStyle(rawValue: String(name.dropFirst(9))) ?? .strip
+            reset(page: nil) {
+                let windows = WindowCatalog.shared.windows(allDesktops: true)
+                LedgeLog.shared.write("switcher: \(windows.count) windows: \(windows.prefix(8).map { "\($0.appName) · \($0.title)" })")
+                record(1.6) { m.showSwitcher(windows, style: style) }
+                WindowCatalog.shared.refreshPreviews(of: windows) { _ in m.switcherPreviews += 1 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { m.moveSwitcher(by: 1) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { m.endSwitcher() }
+            }
         case "enlarge": opened(page: .notes) {
             m.enlargeNote()
             c.recordFrames(to: dir + "-card", seconds: 0.9, every: 0.03, note: true)
@@ -261,6 +281,60 @@ final class IslandManager {
         // Opening (not closing) on a full-screen desktop: the hidden pill comes in first.
         if target?.model.isExpanded == false { target?.revealForShortcut() }
         target?.model.toggleFromShortcut()
+    }
+
+    // MARK: Window switcher
+
+    /// The island showing the switcher right now.
+    private weak var switcherIsland: IslandController?
+    /// Called when a click in the switcher picked a window (the keys go back to normal).
+    var onSwitcherClicked: (() -> Void)?
+
+    /// The switcher's keys: open it, move through it, switch, or cancel. Returns true if handled.
+    func switcher(_ action: SwitcherKeys.Action) -> Bool {
+        switch action {
+        case .open:
+            guard Pref.bool(Pref.switcherOn) else { return false }
+            let p = NSEvent.mouseLocation
+            guard let target = controllers.values.first(where: { $0.contains(point: p) && !$0.isSuppressed })
+                ?? controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return false }
+            let started = Date()
+            let windows = WindowCatalog.shared.windows(allDesktops: Pref.bool(Pref.switcherAllDesktops))
+            let listed = Date().timeIntervalSince(started)
+            let style = SwitcherStyle(rawValue: UserDefaults.standard.string(forKey: SwitcherStyle.key) ?? "") ?? .strip
+            for c in controllers.values where c !== target {
+                if c.model.isExpanded { c.model.close() }
+            }
+            target.revealForShortcut(instant: true)
+            target.model.onSwitcherPick = { [weak self] in
+                self?.onSwitcherClicked?()
+                _ = self?.switcher(.commit)
+            }
+            target.model.showSwitcher(windows, style: style)
+            switcherIsland = target
+            LedgeLog.shared.write("switcher: opened with \(windows.map(\.appName)) (windows in \(Int(listed * 1000)) ms, shown in \(Int(Date().timeIntervalSince(started) * 1000)) ms)")
+            WindowCatalog.shared.readTitles(for: windows) { [weak target] titles in target?.model.updateSwitcherTitles(titles) }
+            if Pref.bool(Pref.switcherPreviews) {
+                // Shown at once from last time; fresh ones replace them as they come in.
+                WindowCatalog.shared.refreshPreviews(of: windows) { [weak target] _ in target?.model.switcherPreviews += 1 }
+            }
+            return true
+        case .next:
+            switcherIsland?.model.moveSwitcher(by: 1)
+            return true
+        case .previous:
+            switcherIsland?.model.moveSwitcher(by: -1)
+            return true
+        case .commit:
+            guard let island = switcherIsland else { return false }
+            switcherIsland = nil
+            if let window = island.model.endSwitcher() { WindowCatalog.shared.focus(window) }
+            return true
+        case .cancel:
+            switcherIsland?.model.endSwitcher()
+            switcherIsland = nil
+            return true
+        }
     }
 
     func islandUnderPointer() -> IslandModel? {

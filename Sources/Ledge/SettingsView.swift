@@ -18,7 +18,7 @@ final class SettingsState: ObservableObject {
 /// folder, or a right-click on the island). A sidebar of sections on the left, one section on the right.
 struct SettingsPanel: View {
     enum Section: String, CaseIterable, Identifiable {
-        case pages, indicators, animation, pomodoro, awake, general
+        case pages, indicators, animation, switcher, pomodoro, awake, general
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -28,6 +28,7 @@ struct SettingsPanel: View {
             case .pomodoro: return "Pomodoro"
             case .awake: return "Stay awake"
             case .general: return "General"
+            case .switcher: return "Switcher"
             }
         }
         var symbol: String {
@@ -38,6 +39,7 @@ struct SettingsPanel: View {
             case .pomodoro: return "target"
             case .awake: return "cup.and.saucer"
             case .general: return "slider.horizontal.3"
+            case .switcher: return "rectangle.on.rectangle"
             }
         }
     }
@@ -61,6 +63,11 @@ struct SettingsPanel: View {
     @AppStorage(Pref.showOnOtherDisplays) private var showOnOtherDisplays = true
     // Animation
     @AppStorage(IslandAnimation.key) private var animation = IslandAnimation.calm.rawValue
+    // Window switcher
+    @AppStorage(Pref.switcherOn) private var switcherOn = true
+    @AppStorage(Pref.switcherPreviews) private var switcherPreviews = true
+    @AppStorage(Pref.switcherAllDesktops) private var switcherAllDesktops = true
+    @AppStorage(SwitcherStyle.key) private var switcherStyle = SwitcherStyle.strip.rawValue
     // Stay awake
     @AppStorage(Pref.awakeDefaultMinutes) private var awakeMinutes = 60
     @AppStorage(Pref.awakeKeepScreenOn) private var awakeScreenOn = true
@@ -197,6 +204,44 @@ struct SettingsPanel: View {
                     SwitchRow(title: "Stay awake while charging", symbol: "bolt.fill", isOn: $awakeCharging)
                 }
                 hint("Click the cup in the open island to start or stop.")
+            case .switcher:
+                Card {
+                    SwitchRow(title: "Window switcher", symbol: "rectangle.on.rectangle", isOn: $switcherOn)
+                    CardDivider()
+                    ShortcutRow()
+                }
+                switcherStyles
+                Card {
+                    SwitchRow(title: "Window previews", symbol: "photo", isOn: $switcherPreviews)
+                    CardDivider()
+                    HStack(spacing: 9) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(width: 16)
+                        Text("Windows from").font(.system(size: 12.5)).foregroundStyle(.white)
+                        Spacer(minLength: 8)
+                        Picker("", selection: $switcherAllDesktops) {
+                            Text("All desktops").tag(true)
+                            Text("This desktop").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    .frame(height: 34)
+                }
+                if switcherPreviews && !WindowCatalog.canCapture {
+                    HStack(spacing: 8) {
+                        Text("Previews and titles need Screen Recording: turn on Ledge, then reopen it.")
+                        Button("Allow…") { WindowCatalog.askForCapture() }
+                            .buttonStyle(PillButtonStyle(prominent: false))
+                    }
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Color(white: 0.55))
+                    .padding(.leading, 4)
+                }
+                hint("Hold the shortcut's modifier and tap its key to move (⇧ goes back), let go to switch. Esc cancels.")
             case .general:
                 Card {
                     SwitchRow(title: "Open at login", symbol: "power", isOn: $state.launchAtLogin)
@@ -228,6 +273,40 @@ struct SettingsPanel: View {
             .font(.system(size: 10.5))
             .foregroundStyle(Color(white: 0.45))
             .padding(.leading, 4)
+    }
+
+    /// The switcher's four styles, picked like the animation styles.
+    private var switcherStyles: some View {
+        let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(SwitcherStyle.allCases, id: \.self) { style in
+                let selected = switcherStyle == style.rawValue
+                Button { switcherStyle = style.rawValue } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(style.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        Text(style.detail)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(2, reservesSpace: true)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .topTrailing) {
+                        if selected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11)).foregroundStyle(Theme.green).padding(8)
+                        }
+                    }
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(white: 0.075)))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(selected ? Theme.green.opacity(0.8) : .clear, lineWidth: 1.2))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScaleStyle())
+            }
+        }
     }
 
     private var animationGrid: some View {
@@ -479,5 +558,95 @@ struct ChoiceRow2: View {
             .fixedSize()
         }
         .frame(height: 34)
+    }
+}
+
+/// The switcher's shortcut: click, then press the keys you want (a modifier and a key).
+struct ShortcutRow: View {
+    @State private var shortcut = SwitcherShortcut.saved
+    @State private var recording = false
+    @State private var hint: String?
+    @State private var monitor: Any?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 9) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 16)
+                Text("Shortcut").font(.system(size: 12.5)).foregroundStyle(.white)
+                Spacer(minLength: 8)
+                if shortcut != .default && !recording {
+                    Button("Reset") {
+                        SwitcherShortcut.default.save()
+                        shortcut = .default
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondaryText)
+                }
+                Button { recording ? stop() : start() } label: {
+                    Text(recording ? "Press keys…" : shortcut.label)
+                        .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(recording ? Theme.green : .white)
+                        .padding(.horizontal, 10)
+                        .frame(minWidth: 70, minHeight: 21)
+                        .background(Capsule().fill(Color(white: 0.2)))
+                        .overlay(Capsule().strokeBorder(recording ? Theme.green : .clear, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Click, then press the shortcut you want")
+            }
+            .frame(height: 34)
+            if let hint {
+                Text(hint)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.amber)
+                    .padding(.leading, 25)
+                    .padding(.bottom, 6)
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private func start() {
+        recording = true
+        hint = nil
+        // The switcher mustn't open while you press its keys here.
+        SwitcherKeys.paused = true
+        // Keys come from Ledge's system-wide key listener, so ⌘Tab can be recorded too (macOS
+        // gives it to its own app switcher, never to a window). The window's own key events are
+        // the fallback, if that listener isn't running.
+        SwitcherKeys.recorder = { e in record(e) }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in record(e) ? nil : e }
+    }
+
+    /// One key press while listening. Returns true when it was used (or refused with a hint).
+    private func record(_ e: NSEvent) -> Bool {
+        let mods = e.modifierFlags.intersection([.command, .option, .control])
+        if e.keyCode == 53, mods.isEmpty { stop(); return true } // Esc: keep the old one
+        guard !mods.isEmpty else {
+            hint = "Hold ⌘, ⌥ or ⌃ and press a key (⇧ is kept for going back)."
+            return true
+        }
+        let new = SwitcherShortcut(keyCode: Int(e.keyCode), modifiers: mods, keyName: SwitcherShortcut.name(for: e))
+        if let clash = new.clash {
+            hint = "\(clash). Pick another."
+            return true
+        }
+        new.save()
+        shortcut = new
+        hint = new.keyCode == 48 && mods == .command ? "Ledge now handles ⌘Tab instead of the Mac's app switcher." : nil
+        stop()
+        return true
+    }
+
+    private func stop() {
+        recording = false
+        SwitcherKeys.paused = false
+        SwitcherKeys.recorder = nil
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }

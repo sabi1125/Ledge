@@ -11,6 +11,7 @@ public enum IslandShape: Equatable, Sendable {
     case expandedTall // open, bigger, for notes: a to-do's notes, quick add notes
     case expandedNotes // open, the Notes page: as wide as expandedTall, a bit taller
     case settings   // Ledge's settings, opened from Spotlight or a right-click
+    case switcher   // the window switcher (its size depends on the style and the windows)
 
     /// Open (normal or tall).
     public var isOpen: Bool { self == .expanded || self == .expandedTall || self == .expandedNotes }
@@ -86,7 +87,10 @@ public enum IslandLayout {
     }
 
     public static func size(for shape: IslandShape, notch: NotchMetrics, style: IslandStyle = .notch,
-                            compactWidth: CGFloat? = nil) -> CGSize {
+                            compactWidth: CGFloat? = nil, switcherSize: CGSize? = nil) -> CGSize {
+        if shape == .switcher {
+            return switcherSize ?? CGSize(width: expandedMinWidth, height: (style == .notch ? notch.height : floatingTopBar) + expandedBody)
+        }
         switch style {
         case .notch:
             switch shape {
@@ -109,6 +113,8 @@ public enum IslandLayout {
                               height: notch.height + expandedNotesBody)
             case .settings:
                 return CGSize(width: settingsWidth, height: notch.height + settingsBody)
+            case .switcher:
+                return .zero // handled above
             }
         case .floating:
             let h = notch.height
@@ -121,6 +127,7 @@ public enum IslandLayout {
             case .expandedTall: return CGSize(width: expandedTallWidth, height: floatingTopBar + expandedTallBody)
             case .expandedNotes: return CGSize(width: expandedTallWidth, height: floatingTopBar + expandedNotesBody)
             case .settings: return CGSize(width: settingsWidth, height: floatingTopBar + settingsBody)
+            case .switcher: return .zero // handled above
             }
         }
     }
@@ -133,10 +140,10 @@ public enum IslandLayout {
             case .idle: return 10
             case .hover, .compact: return notch.height * 0.42
             case .hud: return 24
-            case .expanded, .expandedTall, .expandedNotes, .settings: return 30
+            case .expanded, .expandedTall, .expandedNotes, .settings, .switcher: return 30
             }
         case .floating:
-            return shape.isOpen || shape == .settings ? 26 : size(for: shape, notch: notch, style: style).height / 2
+            return shape.isOpen || shape == .settings || shape == .switcher ? 26 : size(for: shape, notch: notch, style: style).height / 2
         }
     }
 
@@ -149,7 +156,7 @@ public enum IslandLayout {
     /// like the real notch's shoulders. The floating pill has none.
     public static func shoulderRadius(for shape: IslandShape, style: IslandStyle = .notch) -> CGFloat {
         guard style == .notch else { return 0 }
-        return shape.isOpen || shape == .settings ? 12 : 6
+        return shape.isOpen || shape == .settings || shape == .switcher ? 12 : 6
     }
 
     /// Space above the island inside its window.

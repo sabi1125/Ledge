@@ -71,7 +71,8 @@ struct IslandRootView: View {
 
     private var target: IslandGeometry {
         let shape = model.shape, style = model.style
-        let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth)
+        let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth,
+                                     switcherSize: model.switcher?.size)
         return IslandGeometry(width: size.width, height: size.height,
                               bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
                               topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style),
@@ -218,6 +219,13 @@ struct IslandRootView: View {
                 .frame(width: tracksWidth && didAppear ? width : full.width, alignment: .top)
                 .frame(height: tracksHeight && didAppear ? height : full.height, alignment: .top)
                 .transition(Self.fade)
+        case .switcher:
+            if let state = model.switcher {
+                SwitcherView(model: model, state: state)
+                    .frame(width: state.size.width, height: state.size.height, alignment: .top)
+                    // In and out at once, like the shape (see `IslandModel.showSwitcher`).
+                    .transition(.identity)
+            }
         case .settings:
             SettingsPanel(model: model, state: settings, updater: updater)
                 .fixedFrame(for: .settings, model: model)

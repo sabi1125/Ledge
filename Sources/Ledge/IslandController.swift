@@ -683,7 +683,8 @@ final class IslandController {
     /// The area that currently counts as "the island" for the pointer.
     private func hitRect() -> NSRect {
         guard anchorRect != .zero else { return .zero }
-        let size = IslandLayout.size(for: model.shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth)
+        let size = IslandLayout.size(for: model.shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth,
+                                     switcherSize: model.switcher?.size)
         let w = max(size.width, anchorRect.width)
         let h = max(size.height, anchorRect.height) + IslandLayout.topGap(style: model.style)
         // A little slack on the sides, and an extra point above so the very top edge counts.
@@ -866,7 +867,7 @@ final class IslandController {
             // (it closes on a click outside or Esc, like on a normal desktop; ⌘L may have opened
             // it with the pointer on another screen).
             let showingAlert = alertUntil.map { Date() < $0 } ?? false
-            let inUse = model.isExpanded || model.isShowingSettings || model.isTyping
+            let inUse = model.isExpanded || model.isShowingSettings || model.isTyping || model.switcher != nil
             let keep = showingAlert || inUse || onThisScreen && (fromTop <= 26 || hitRect().contains(p))
             if keep {
                 hideReveal?.cancel()
@@ -901,19 +902,24 @@ final class IslandController {
 
     /// A shortcut (⌘L, quick add, settings) is about to open this island: on a full-screen
     /// desktop, where the pill is hidden, bring it in first so there's something to open.
-    func revealForShortcut() {
+    /// `instant`: shown at once, not faded in with the menu bar (the window switcher).
+    func revealForShortcut(instant: Bool = false) {
         guard model.style == .floating, let fs = fullScreenSpace, revealedSpace == nil else { return }
         LedgeLog.shared.write("fullscreen: a shortcut opened the pill on display \(displayID)")
-        beginReveal(on: fs)
+        beginReveal(on: fs, instant: instant)
     }
 
-    private func beginReveal(on space: UInt64) {
+    private func beginReveal(on space: UInt64, instant: Bool = false) {
         guard let twin = revealPanel else { return }
         revealedSpace = space
         model.twinIsShowing = true
         LedgeLog.shared.write("fullscreen: pointer at the top of display \(displayID), showing the pill")
         twin.contentView?.isHidden = false
         twin.orderFrontRegardless()
+        if instant {
+            twin.alphaValue = 1
+            return
+        }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22 // about as long as the menu bar takes to slide down
             twin.animator().alphaValue = 1
