@@ -12,6 +12,7 @@ public enum IslandShape: Equatable, Sendable {
     case expandedNotes // open, the Notes page: as wide as expandedTall, a bit taller
     case settings   // Ledge's settings, opened from Spotlight or a right-click
     case switcher   // the window switcher (its size depends on the style and the windows)
+    case drop       // a file is being dragged toward the closed island: it grows into a drop target
 
     /// Open (normal or tall).
     public var isOpen: Bool { self == .expanded || self == .expandedTall || self == .expandedNotes }
@@ -67,6 +68,11 @@ public enum IslandLayout {
     public static let settingsBody: CGFloat = 272
     /// Height of the page bar at the top of an open floating island.
     public static let floatingTopBar: CGFloat = 28
+    /// The tray strip under the open island's page (only while it's shown).
+    public static let trayHeight: CGFloat = 44
+    /// The drop target the closed island grows into while files are dragged near it.
+    public static let dropWidth: CGFloat = 380
+    public static let dropBody: CGFloat = 66
     /// Gap between the top of the screen and a floating island.
     public static let floatingTopGap: CGFloat = 3
 
@@ -86,11 +92,19 @@ public enum IslandLayout {
         return (art, leading, leading + 3, 9, 16)
     }
 
+    /// `tray`: the open island has the tray strip under its page (taller by `trayHeight`).
     public static func size(for shape: IslandShape, notch: NotchMetrics, style: IslandStyle = .notch,
-                            compactWidth: CGFloat? = nil, switcherSize: CGSize? = nil) -> CGSize {
+                            compactWidth: CGFloat? = nil, switcherSize: CGSize? = nil, tray: Bool = false) -> CGSize {
         if shape == .switcher {
             return switcherSize ?? CGSize(width: expandedMinWidth, height: (style == .notch ? notch.height : floatingTopBar) + expandedBody)
         }
+        var s = baseSize(for: shape, notch: notch, style: style, compactWidth: compactWidth)
+        if tray && shape.isOpen { s.height += trayHeight }
+        return s
+    }
+
+    private static func baseSize(for shape: IslandShape, notch: NotchMetrics, style: IslandStyle,
+                                 compactWidth: CGFloat?) -> CGSize {
         switch style {
         case .notch:
             switch shape {
@@ -115,6 +129,8 @@ public enum IslandLayout {
                 return CGSize(width: settingsWidth, height: notch.height + settingsBody)
             case .switcher:
                 return .zero // handled above
+            case .drop:
+                return CGSize(width: max(notch.width + 195, dropWidth), height: notch.height + dropBody)
             }
         case .floating:
             let h = notch.height
@@ -128,6 +144,7 @@ public enum IslandLayout {
             case .expandedNotes: return CGSize(width: expandedTallWidth, height: floatingTopBar + expandedNotesBody)
             case .settings: return CGSize(width: settingsWidth, height: floatingTopBar + settingsBody)
             case .switcher: return .zero // handled above
+            case .drop: return CGSize(width: dropWidth, height: 62)
             }
         }
     }
@@ -141,9 +158,10 @@ public enum IslandLayout {
             case .hover, .compact: return notch.height * 0.42
             case .hud: return 24
             case .expanded, .expandedTall, .expandedNotes, .settings, .switcher: return 30
+            case .drop: return 26
             }
         case .floating:
-            return shape.isOpen || shape == .settings || shape == .switcher ? 26 : size(for: shape, notch: notch, style: style).height / 2
+            return shape.isOpen || shape == .settings || shape == .switcher || shape == .drop ? 26 : size(for: shape, notch: notch, style: style).height / 2
         }
     }
 
@@ -156,7 +174,7 @@ public enum IslandLayout {
     /// like the real notch's shoulders. The floating pill has none.
     public static func shoulderRadius(for shape: IslandShape, style: IslandStyle = .notch) -> CGFloat {
         guard style == .notch else { return 0 }
-        return shape.isOpen || shape == .settings || shape == .switcher ? 12 : 6
+        return shape.isOpen || shape == .settings || shape == .switcher || shape == .drop ? 12 : 6
     }
 
     /// Space above the island inside its window.
@@ -167,7 +185,8 @@ public enum IslandLayout {
     /// The window that hosts the island never changes size; it's big enough
     /// for the largest shape plus its shadow.
     public static func panelSize(notch: NotchMetrics, style: IslandStyle = .notch) -> CGSize {
-        let biggest = [IslandShape.expanded, .expandedTall, .expandedNotes, .hud, .settings].map { size(for: $0, notch: notch, style: style) }
+        let biggest = [IslandShape.expanded, .expandedTall, .expandedNotes, .hud, .settings, .drop]
+            .map { size(for: $0, notch: notch, style: style, tray: true) }
         return CGSize(width: biggest.map(\.width).max()! + 120,
                       height: biggest.map(\.height).max()! + topGap(style: style) + 50)
     }

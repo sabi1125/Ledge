@@ -37,6 +37,10 @@ final class WindowCatalog {
     private var real = Set<CGWindowID>()
     /// Windows found not to be standard (helpers, strips), or not found at all.
     private var notReal = Set<CGWindowID>()
+    /// Each real window's Accessibility handle, found by the scan on whichever desktop it's on.
+    /// Raising a window through it takes macOS to that window's desktop, even between two windows
+    /// of the same app in full screen (where making the app active does nothing: it already is).
+    private var handles: [CGWindowID: AXHandle] = [:]
     private var scanTimer: Timer?
     private var scanning = false
 
@@ -82,6 +86,7 @@ final class WindowCatalog {
         let byApp = Dictionary(grouping: unknown, by: \.pid)
         DispatchQueue.global(qos: .utility).async {
             var yes = Set<CGWindowID>(), no = Set<CGWindowID>()
+            var newHandles: [CGWindowID: AXHandle] = [:]
             var titles: [CGWindowID: String] = [:]
             var reasons: [String] = []
             for (pid, windows) in byApp {
@@ -91,6 +96,7 @@ final class WindowCatalog {
                         left.remove(id)
                         if Self.isStandard(element) {
                             yes.insert(id)
+                            newHandles[id] = AXHandle(element: element)
                             var value: CFTypeRef?
                             if AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &value) == .success,
                                let t = value as? String, !t.isEmpty { titles[id] = t }
@@ -121,6 +127,8 @@ final class WindowCatalog {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self.real.formUnion(yes)
+                    self.handles.merge(newHandles) { _, new in new }
+                    self.handles = self.handles.filter { self.real.contains($0.key) }
                     self.notReal.formUnion(no)
                     for (id, t) in titles { self.titleCache[id] = t }
                     self.scanning = false
@@ -308,6 +316,8 @@ final class WindowCatalog {
                   let width = b["Width"], let height = b["Height"], width >= 100, height >= 60 else { return nil }
             let (isRegular, name) = app(pid)
             guard isRegular else { return nil }
+            // Notes (or Reminders) running hidden in the background for Ledge: not a window of yours.
+            if let running = NSRunningApplication(processIdentifier: pid), AppleScriptBridge.isBackgroundHelper(running) { return nil }
             return SwitcherWindow(id: id, pid: pid, appName: name,
                                   title: w[kCGWindowName as String] as? String ?? "",
                                   bounds: CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: width, height: height),
@@ -326,6 +336,26 @@ final class WindowCatalog {
         // window forward", like AltTab and Mission Control. That moves to its desktop; making an
         // app active the normal way first keeps you where you are instead.
         let onScreenNow = Self.rawWindows(onScreenOnly: true).contains { $0.id == window.id }
+        // Another window of the app you're already in, on another desktop (two Firefox windows,
+        // each full screen): making the app active does nothing, so raise that exact window, which
+        // takes macOS to its desktop.
+        if !onScreenNow, NSWorkspace.shared.frontmostApplication?.processIdentifier == window.pid {
+            let forward = Self.bringForward(pid: window.pid, window: window.id)
+            let element = handles[window.id]?.element
+                ?? Self.axWindowsAnywhere(of: window.pid, wanted: [window.id]).first(where: { $0.1 == window.id })?.0
+            var raised = false
+            if let element {
+                AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+                raised = AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success
+                AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            }
+            LedgeLog.shared.write("switcher: to another \(window.appName) window on another desktop (window server \(forward), raised \(raised))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let visible = Self.rawWindows(onScreenOnly: true).contains { $0.id == window.id }
+                LedgeLog.shared.write("switcher: \(window.appName)'s window \(visible ? "is on screen now" : "still isn't on screen")")
+            }
+            return
+        }
         if !onScreenNow {
             // The window server's "bring this window forward" (that's how it gets into full screen)…
             let forward = Self.bringForward(pid: window.pid, window: window.id)
@@ -337,8 +367,9 @@ final class WindowCatalog {
             LedgeLog.shared.write("switcher: to \(window.appName) on another desktop (window server \(forward))")
             // Once its desktop is showing: that exact window in front (two Chromes on different
             // desktops: the one you picked, not the other).
+            let handle = handles[window.id]?.element
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if let element = Self.axWindows(of: window.pid).first(where: { $0.1 == window.id })?.0 {
+                if let element = handle ?? Self.axWindows(of: window.pid).first(where: { $0.1 == window.id })?.0 {
                     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
                     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 }
@@ -488,4 +519,9 @@ private enum Private {
         guard let handle = dlopen(path, RTLD_NOW), let s = dlsym(handle, name) else { return nil }
         return unsafeBitCast(s, to: T.self)
     }
+}
+
+/// An Accessibility handle for a window, passed between the scan's queue and the main thread.
+struct AXHandle: @unchecked Sendable {
+    let element: AXUIElement
 }

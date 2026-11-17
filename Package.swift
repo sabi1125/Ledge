@@ -19,6 +19,8 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("Quartz"),
+                .linkedFramework("QuickLookThumbnailing"),
             ]
         ),
         .testTarget(name: "LedgeCoreTests", dependencies: ["LedgeCore"], path: "Tests/LedgeCoreTests"),

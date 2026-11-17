@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openHotKey: HotKey?
     /// The window switcher's shortcut (⌥Tab by default, set in settings).
     private let switcherKeys = SwitcherKeys()
+    private var trayHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.registerDefaults()
@@ -166,6 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // including the browsers' "go to the address bar".
         openHotKey = HotKey(keyCode: kVK_ANSI_L, modifiers: cmdKey, id: 4) { [weak self] in
             self?.islands.toggleFromShortcut()
+        }
+        // ⌃⌥F: show or hide the tray (files you dropped on the island), from anywhere.
+        trayHotKey = HotKey(keyCode: kVK_ANSI_F, modifiers: controlKey | optionKey, id: 5) { [weak self] in
+            self?.islands.toggleTray()
         }
 
         if !Pref.bool(Pref.didFirstLaunch), !LoginItem.isEnabled {

@@ -30,6 +30,10 @@ enum Pref {
     static let switcherAllDesktops = "switcherAllDesktops"
     /// The Notes page shows its list of notes (⌥⌘S or the sidebar button hides it).
     static let notesSidebar = "notesSidebar"
+    /// The Notes page's text box takes Vim keys (normal, insert and visual mode).
+    static let vimMotions = "vimMotions"
+    /// The tray: drop files on the island to hold them (up to 5); ⌃⌥F shows it.
+    static let trayEnabled = "trayEnabled"
 
     /// The island pages switched on in settings (Music uses "Show what's playing").
     static var enabledPages: Set<IslandPage> {
@@ -67,6 +71,8 @@ enum Pref {
             switcherPreviews: true,
             switcherAllDesktops: true,
             SwitcherStyle.key: SwitcherStyle.strip.rawValue,
+            vimMotions: false,
+            trayEnabled: true,
         ])
     }
 

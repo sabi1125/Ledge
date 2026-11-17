@@ -91,6 +91,13 @@ final class IslandController {
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateTodoShortcut() } }
             .store(in: &cancellables)
 
+        // The tray hides again whenever the island closes: it only shows when you ask (⌃⌥F).
+        model.$isExpanded
+            .dropFirst()
+            .filter { !$0 }
+            .sink { _ in TrayStore.shared.isShown = false }
+            .store(in: &cancellables)
+
         // Leaving Notes or closing: hand keyboard focus back to the app you were in.
         model.onEndTyping = { [weak self] in self?.giveBackFocus() }
         // Quick add (and an opened to-do) take the keyboard right away. Ledge becomes the active
@@ -122,7 +129,7 @@ final class IslandController {
 
     /// The open island on the Notes page, in screen coordinates: where the card starts and ends.
     private func islandNotesRect() -> NSRect {
-        let size = IslandLayout.size(for: .expandedNotes, notch: model.notch, style: model.style)
+        let size = IslandLayout.size(for: .expandedNotes, notch: model.notch, style: model.style, tray: model.trayArea)
         let top = screenTop - IslandLayout.topGap(style: model.style)
         return NSRect(x: anchorRect.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
     }
@@ -240,12 +247,12 @@ final class IslandController {
         p.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         // On whichever desktop you're on, full-screen ones included.
         p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
-        // Another app taking over (a click elsewhere, ⌘Tab) closes it, like the island.
+        // Another app taking over (a click elsewhere, ⌘Tab) leaves it open, like the island:
+        // only ⌘L or Esc close it.
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: p, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.model.isNoteEnlarged, !NSApp.isActive || NSApp.keyWindow == nil else { return }
-                LedgeLog.shared.write("notes: enlarged note lost the keyboard")
-                self.model.closeEnlargedNote()
+                LedgeLog.shared.write("notes: enlarged note lost the keyboard (stays open)")
             }
         }
         return p
@@ -276,6 +283,21 @@ final class IslandController {
     private var newItemHotKey: HotKey?
     private var settingsHotKey: HotKey?
     private var pageHotKeys: [HotKey] = []
+
+    /// Esc that belongs to the text box you're typing in: a Japanese (or other) input method
+    /// cancelling a conversion, or Vim going back to normal mode. The Esc hot key catches Esc
+    /// before the window sees it, so it's handed to the text box here. True when it took it.
+    private func giveEscapeToTextBox() -> Bool {
+        guard NSApp.isActive, let window = NSApp.keyWindow,
+              let editor = window.firstResponder as? NSTextView else { return false }
+        let wanted = editor.hasMarkedText() || (editor as? MarkdownTextView)?.vimWantsEscape == true
+        guard wanted, let escape = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false, keyCode: UInt16(kVK_Escape)) else { return false }
+        editor.keyDown(with: escape)
+        return true
+    }
 
     /// Esc steps back one level: notes → title line → cancel quick add; an open to-do → the list;
     /// settings or the open island → closed.
@@ -410,9 +432,17 @@ final class IslandController {
         return source.hasPrefix("com.apple.keylayout") || source.hasSuffix(".Roman")
     }
 
+    /// After a click outside, the open island stays open but steps back: ⌘N, ⌘T, ⌘1–⌘4, ⌘, and
+    /// Esc go back to the app you clicked into. Pointing at the island (or opening it again)
+    /// brings them back. ⌘L always works.
+    private var steppedBack = false
+
     private func updateTodoShortcut() {
         let m = model
-        let wanted = m.isExpanded && m.page == .calendar && m.calendarMode == .todos
+        if !m.isExpanded && !m.isShowingSettings && !m.isNoteEnlarged { steppedBack = false }
+        if m.isHovering { steppedBack = false }
+        let active = !steppedBack
+        let wanted = active && m.isExpanded && m.page == .calendar && m.calendarMode == .todos
             && !m.isQuickAdding && m.openTodoID == nil && !m.isShowingSettings
         if wanted, todoHotKey == nil {
             todoHotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: cmdKey, id: 100 + displayID % 1000) { [weak self] in
@@ -423,7 +453,7 @@ final class IslandController {
         }
         // ⌘N on the Calendar page: a new event (or a new to-do in To-dos mode), like the +.
         // (While quick add is open, ⌘N switches to its notes instead: that's handled by the window.)
-        let wantsNewItem = m.isExpanded && m.page == .calendar && !m.isQuickAdding
+        let wantsNewItem = active && m.isExpanded && m.page == .calendar && !m.isQuickAdding
             && m.openTodoID == nil && !m.isShowingSettings
         if wantsNewItem, newItemHotKey == nil {
             newItemHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 5000 + displayID % 1000) { [weak self] in
@@ -434,7 +464,7 @@ final class IslandController {
         }
         // ⌘N makes a new note while the island is open on the Notes page (taken from other apps
         // only during that time, like ⌘T on the to-do list).
-        let wantsNewNote = (m.isExpanded && m.page == .notes || m.isNoteEnlarged) && !m.isShowingSettings
+        let wantsNewNote = active && (m.isExpanded && m.page == .notes || m.isNoteEnlarged) && !m.isShowingSettings
         if wantsNewNote, newNoteHotKey == nil {
             newNoteHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 3000 + displayID % 1000) { [weak self] in
                 guard let self else { return }
@@ -445,7 +475,7 @@ final class IslandController {
             newNoteHotKey = nil
         }
         // ⌘, opens settings while the island is open (taken from other apps only during that time).
-        let wantsSettingsKey = m.isExpanded && !m.isShowingSettings
+        let wantsSettingsKey = active && m.isExpanded && !m.isShowingSettings
         if wantsSettingsKey, settingsHotKey == nil {
             settingsHotKey = HotKey(keyCode: kVK_ANSI_Comma, modifiers: cmdKey, id: 6000 + displayID % 1000) { [weak self] in
                 self?.model.openSettings()
@@ -454,7 +484,7 @@ final class IslandController {
             settingsHotKey = nil
         }
         // ⌘1–⌘4 switch pages while the island is open (in the order of the dots).
-        let wantsPages = m.isExpanded && !m.isShowingSettings
+        let wantsPages = active && m.isExpanded && !m.isShowingSettings
         if wantsPages, pageHotKeys.isEmpty {
             let keys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4]
             pageHotKeys = keys.enumerated().map { i, key in
@@ -467,10 +497,11 @@ final class IslandController {
         }
         // Esc while an island is open: it closes or steps back even when you only hovered it
         // open (and it doesn't have the keyboard). Taken from other apps only while it's open.
-        let wantsEscape = m.isExpanded || m.isShowingSettings || m.isNoteEnlarged
+        let wantsEscape = active && (m.isExpanded || m.isShowingSettings || m.isNoteEnlarged)
         if wantsEscape, escapeHotKey == nil {
             escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0, id: 2000 + displayID % 1000) { [weak self] in
-                _ = self?.handleEscape()
+                guard let self, !self.giveEscapeToTextBox() else { return }
+                _ = self.handleEscape()
             }
         } else if !wantsEscape, escapeHotKey != nil {
             escapeHotKey = nil
@@ -684,7 +715,7 @@ final class IslandController {
     private func hitRect() -> NSRect {
         guard anchorRect != .zero else { return .zero }
         let size = IslandLayout.size(for: model.shape, notch: model.notch, style: model.style, compactWidth: model.compactWidth,
-                                     switcherSize: model.switcher?.size)
+                                     switcherSize: model.switcher?.size, tray: model.trayArea)
         let w = max(size.width, anchorRect.width)
         let h = max(size.height, anchorRect.height) + IslandLayout.topGap(style: model.style)
         // A little slack on the sides, and an extra point above so the very top edge counts.
@@ -695,9 +726,18 @@ final class IslandController {
 
     private func installMonitors() {
         let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.updatePointer() }
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] e in
+            let type = e.type
+            MainActor.assumeIsolated {
+                if type == .leftMouseDragged { self?.trackFileDrag(.leftMouseDragged) }
+                self?.updatePointer()
+            }
         }) { monitors.append(g) }
+        // Presses and releases in other apps: where a Finder drag starts and ends (for the tray).
+        if let d = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp], handler: { [weak self] e in
+            let type = e.type
+            MainActor.assumeIsolated { self?.trackFileDrag(type) }
+        }) { monitors.append(d) }
         if let l = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self] e in
             MainActor.assumeIsolated { self?.updatePointer() }
             return e
@@ -716,6 +756,17 @@ final class IslandController {
                 return window === self.panel || window === self.revealPanel || window === self.notePanel
             }
             guard mine else { return e }
+            // Esc and Tab while a Japanese (or other) input method is still composing belong to it:
+            // Esc cancels the conversion, Tab picks a suggestion. Don't close the island or indent.
+            if e.keyCode == 53 || e.keyCode == 48,
+               MainActor.assumeIsolated({ ((e.window?.firstResponder as? NSTextView)?.hasMarkedText()) == true }) {
+                return e
+            }
+            // Vim keys in the note go straight to it, ahead of the typing helpers below (Tab, "[",
+            // "`", backspace) and of Esc closing the island. Esc in normal mode still closes it.
+            if MainActor.assumeIsolated({ (e.window?.firstResponder as? MarkdownTextView)?.takesVimKey(e) == true }) {
+                return e
+            }
             // Copy, paste, cut, select all, undo and redo while typing. Ledge has no Edit menu (it
             // runs without a menu bar), so these are passed to the text field directly.
             let edited = MainActor.assumeIsolated { () -> Bool in
@@ -798,19 +849,20 @@ final class IslandController {
             }
             return handled ? nil : e
         }) { monitors.append(k) }
-        // A click anywhere else closes settings, or the open island. (What you were typing in
-        // quick add is kept for next time.)
+        // A click anywhere else doesn't close anything: only ⌘L and Esc do, so you can work in
+        // other apps (or drag files in from Finder) with Ledge open. The island steps back
+        // instead: its shortcuts go back to the app you clicked into (see `steppedBack`).
         if let c = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                // The enlarged note closes on a click anywhere outside it.
-                if self.model.isNoteEnlarged {
-                    if let f = self.notePanel?.frame, !f.contains(NSEvent.mouseLocation) { self.model.closeEnlargedNote() }
-                    return
-                }
-                guard !self.hitRect().contains(NSEvent.mouseLocation) else { return }
-                if self.model.isShowingSettings { self.model.closeSettings() }
-                else if self.model.isExpanded { self.model.close() }
+                let m = self.model
+                guard m.isExpanded || m.isShowingSettings || m.isNoteEnlarged else { return }
+                let p = NSEvent.mouseLocation
+                if m.isNoteEnlarged, let f = self.notePanel?.frame, f.contains(p) { return }
+                guard !self.hitRect().contains(p), !self.steppedBack else { return }
+                LedgeLog.shared.write("keys: clicked outside, island stays open and gives its shortcuts back")
+                self.steppedBack = true
+                self.updateTodoShortcut()
             }
         }) { monitors.append(c) }
     }
@@ -864,7 +916,7 @@ final class IslandController {
             }
         } else {
             // Stays while you're up in the menu bar or on the pill, and while the island is open
-            // (it closes on a click outside or Esc, like on a normal desktop; ⌘L may have opened
+            // (it closes with ⌘L or Esc, like on a normal desktop; ⌘L may have opened
             // it with the pointer on another screen).
             let showingAlert = alertUntil.map { Date() < $0 } ?? false
             let inUse = model.isExpanded || model.isShowingSettings || model.isTyping || model.switcher != nil
@@ -955,6 +1007,13 @@ final class IslandController {
     private func updatePointer() {
         checkFullScreenReveal()
         guard let panel = activePanel, panel.isVisible, !isHidden else { return }
+        // Files are being dragged here: the island takes the drop while the pointer is over it
+        // (and doesn't open on hover meanwhile).
+        if model.fileDrag != nil {
+            let over = hitRect().insetBy(dx: -8, dy: -8).contains(NSEvent.mouseLocation)
+            if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
+            return
+        }
         var inside = hitRect().contains(NSEvent.mouseLocation)
         // While a mouse button is held (dragging a window, selecting text, resizing), passing
         // over the notch shouldn't open the island. A drag that started on the island
@@ -962,6 +1021,65 @@ final class IslandController {
         if NSEvent.pressedMouseButtons != 0 && !model.isHovering { inside = false }
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
         if inside { model.pointerEntered() } else { model.pointerExited() }
+    }
+
+    // MARK: Tray drops
+
+    /// The drag pasteboard's count when the mouse went down: a change means a drag started.
+    private var dragBaseline = NSPasteboard(name: .drag).changeCount
+    /// What the drag in progress carries (nil: no file drag, or not looked at yet).
+    private var draggedFiles: (files: Int, folders: Int)?
+
+    /// Watches drags in other apps (Finder, the desktop, Mail…). When one carrying files comes
+    /// near the top of this screen (or over the open island), the island shows its drop target.
+    private func trackFileDrag(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDown:
+            dragBaseline = NSPasteboard(name: .drag).changeCount
+            draggedFiles = nil
+        case .leftMouseUp:
+            guard draggedFiles != nil || model.fileDrag != nil else { return }
+            draggedFiles = nil
+            // The drop arrives around now; leave the target up a moment so it can land.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, NSEvent.pressedMouseButtons & 1 == 0 else { return }
+                self.model.setFileDrag(nil)
+            }
+        case .leftMouseDragged:
+            guard Pref.bool(Pref.trayEnabled), !isHidden, !model.isShowingSettings, !model.isNoteEnlarged else { return }
+            let pb = NSPasteboard(name: .drag)
+            guard pb.changeCount != dragBaseline else { return }
+            if draggedFiles == nil {
+                let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+                guard !urls.isEmpty else {
+                    dragBaseline = pb.changeCount // text, a picture from a browser…: not for the tray
+                    return
+                }
+                let folders = urls.filter {
+                    let v = try? $0.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+                    return v?.isDirectory == true && v?.isPackage != true
+                }.count
+                draggedFiles = (urls.count - folders, folders)
+                LedgeLog.shared.write("tray: a drag with \(urls.count) file(s) started")
+            }
+            guard let d = draggedFiles else { return }
+            let p = NSEvent.mouseLocation
+            let near: Bool
+            if !contains(point: p) {
+                near = false
+            } else if model.fileDrag != nil || model.isExpanded {
+                near = hitRect().insetBy(dx: -24, dy: -24).contains(p)
+            } else {
+                near = screenTop - p.y <= 60 && abs(p.x - anchorRect.midX) <= 260
+            }
+            if near, model.fileDrag == nil {
+                model.setFileDrag(FileDrag(files: d.files, folders: d.folders))
+            } else if !near, model.fileDrag != nil {
+                model.setFileDrag(nil)
+            }
+        default:
+            break
+        }
     }
 
     private func handleScroll(_ e: NSEvent) {

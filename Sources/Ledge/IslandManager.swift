@@ -337,6 +337,17 @@ final class IslandManager {
         }
     }
 
+    /// ⌃⌥F: the tray on the island you're using (opens it on your last page if it's closed).
+    func toggleTray() {
+        let p = NSEvent.mouseLocation
+        let target = controllers.values.first { $0.contains(point: p) && !$0.isSuppressed }
+            ?? controllers.values.first { $0.model.style == .notch }
+            ?? controllers.values.first
+        for c in controllers.values where c !== target && c.model.isExpanded { c.model.close() }
+        if target?.model.isExpanded == false, !TrayStore.shared.items.isEmpty { target?.revealForShortcut() }
+        target?.model.toggleTray()
+    }
+
     func islandUnderPointer() -> IslandModel? {
         let p = NSEvent.mouseLocation
         if let c = controllers.values.first(where: { $0.contains(point: p) }) { return c.model }

@@ -161,7 +161,10 @@ public enum Checklist {
     /// on a list, numbered, checklist or "> " quote line starts the next one ("2." after "1.").
     /// Return on an empty one ends it; return right before an item's text pushes the item down,
     /// leaving an empty one above. Returns the new text, or nil when nothing needs changing.
-    public static func autoFormat(old: String, new: String) -> String? {
+    /// `cursor` (UTF-16, just after the return) says which line break is the new one when there
+    /// are several in a row: "> a" + return, with a line below, looks the same as a return typed
+    /// on an empty line under it.
+    public static func autoFormat(old: String, new: String, cursor: Int? = nil) -> String? {
         // "[] " or "[ ] " typed at the start of a line.
         let range = NSRange(location: 0, length: (new as NSString).length)
         if shortcut.firstMatch(in: new, range: range) != nil {
@@ -170,7 +173,12 @@ public enum Checklist {
         // A single return typed.
         let a = Array(old), b = Array(new)
         guard b.count == a.count + 1 else { return nil }
-        let at = zip(a, b).prefix { $0 == $1 }.count
+        var at = zip(a, b).prefix { $0 == $1 }.count
+        if let cursor, cursor >= 1, cursor <= new.utf16.count,
+           let typed = String.Index(new.utf16.index(new.utf16.startIndex, offsetBy: cursor - 1), within: new) {
+            let position = new.distance(from: new.startIndex, to: typed)
+            if position <= at, at < b.count, b[position...at].allSatisfy({ $0 == "\n" }) { at = position }
+        }
         guard at < b.count, b[at] == "\n" else { return nil }
         let before = String(a[..<at])
         let lineStart = before.lastIndex(of: "\n").map { before.index(after: $0) } ?? before.startIndex

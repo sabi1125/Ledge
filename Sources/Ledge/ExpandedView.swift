@@ -55,6 +55,11 @@ struct ExpandedView: View {
                     .animation(.smooth(duration: 0.3), value: model.page)
                 }
                 .clipped()
+            // The tray under the page (⌃⌥F), or the drop box while files are dragged over.
+            if model.trayArea {
+                TrayStrip(model: model)
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -86,6 +91,7 @@ struct ExpandedView: View {
 struct TopBar: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var awake: AwakeStore
+    @ObservedObject var tray: TrayStore = .shared
     /// Shows the + (Calendar page, with calendar access).
     var canQuickAdd = false
     var showAwakeMenu: () -> Void
@@ -143,6 +149,11 @@ struct TopBar: View {
                 .padding(.trailing, 8)
                 .animation(.easeOut(duration: 0.2)) { $0.opacity(canQuickAdd ? 1 : 0) }
                 .allowsHitTesting(canQuickAdd)
+                if trayHidden {
+                    TrayGlyph()
+                        .padding(.trailing, 6)
+                        .transition(.opacity)
+                }
                 AwakeCup(awake: awake, showMenu: showAwakeMenu)
                     .fixedSize()
                     .padding(.trailing, 8)
@@ -154,6 +165,11 @@ struct TopBar: View {
         .padding(.horizontal, 20)
         .frame(height: model.style == .notch ? model.notch.height : IslandLayout.floatingTopBar)
         .padding(.top, model.style == .notch ? 0 : 2)
+    }
+
+    /// The tray is holding something but hidden: a small tray and the count by the dots.
+    private var trayHidden: Bool {
+        Pref.bool(Pref.trayEnabled) && !tray.isShown && !tray.items.isEmpty
     }
 
     private func titleLabel(_ title: String, symbol: String) -> some View {
@@ -459,6 +475,7 @@ struct NotesPage: View {
     /// Delete was clicked once; a second click within 3 seconds deletes.
     @State private var confirmingDelete = false
     @AppStorage(Pref.notesSidebar) private var showsList = true
+    @AppStorage(Pref.vimMotions) private var vimMotions = false
     /// The note's text box (a macOS text view, so it sits outside `focus`) has the cursor.
     @State private var bodyFocused = false
     /// The cursor should go into the text box, as soon as it's on screen.
@@ -551,10 +568,6 @@ struct NotesPage: View {
         .onChange(of: model.notesWantsCursor, initial: true) { _, _ in takeCursorIfAsked() }
         // ⌘N or the pencil: the cursor goes to the new note's title (all selected, so typing replaces it).
         .onChange(of: notes.newNoteCount) { _, _ in focus = .title }
-        // "[] " becomes a checkbox; return on a list line starts the next one (Tab indents it).
-        .onChange(of: notes.text) { old, new in
-            if let fixed = Checklist.autoFormat(old: old, new: new) { notes.text = fixed }
-        }
         .onDisappear { notes.saveNow() }
     }
 
@@ -722,7 +735,8 @@ struct NotesPage: View {
                 ZStack(alignment: .topLeading) {
                     if settled {
                         // Markdown is styled as you type: "## Plan" big, "**x**" bold, "---" a line.
-                        MarkdownEditor(text: $notes.text, wantsFocus: wantsBodyFocus, blurRequest: bodyBlurRequest) { now in
+                        MarkdownEditor(text: $notes.text, wantsFocus: wantsBodyFocus, blurRequest: bodyBlurRequest,
+                                       vimMotions: vimMotions) { now in
                             bodyFocused = now
                             if now { wantsBodyFocus = false }
                         }
@@ -775,9 +789,8 @@ struct EnlargedNoteView: View {
         let card = UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom,
                                           bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous)
         ZStack(alignment: .topLeading) {
-            // The clear space around the card counts as "outside": a click there closes it too.
-            Color.black.opacity(0.001)
-                .onTapGesture { model.closeEnlargedNote() }
+            // The clear space around the card lets clicks through to whatever is behind it
+            // (a click outside never closes the note: only ⌘L or Esc do).
             card.fill(Color.black)
                 .frame(width: r.width, height: r.height)
                 .shadow(color: .black.opacity(motion.expanded ? 0.5 : 0), radius: 26, y: 12)

@@ -99,6 +99,9 @@ enum NotesMarkdown {
     private static let quoteTextColor = NSColor(white: 1, alpha: 0.82)
     private static let quietTextColor = NSColor(white: 1, alpha: 0.42)
     private static let numberColor = NSColor(white: 1, alpha: 0.6)
+    /// The cursor (and Vim's block cursor): the timer's orange, easy to spot on black and on a code card.
+    /// The character under the block is drawn in black, like in a terminal.
+    static let cursorColor = NSColor(srgbRed: 1.0, green: 0.62, blue: 0.2, alpha: 1)
 
     // MARK: Styling
 
@@ -388,6 +391,8 @@ struct MarkdownEditor: NSViewRepresentable {
     var wantsFocus: Bool
     /// Each change takes the cursor out of the box.
     var blurRequest: Int
+    /// Vim keys (settings → Text editor → Vim motions).
+    var vimMotions = false
     /// The box got (true) or lost (false) the cursor.
     var onFocusChange: (Bool) -> Void
 
@@ -423,12 +428,13 @@ struct MarkdownEditor: NSViewRepresentable {
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
-        view.insertionPointColor = .white
+        view.insertionPointColor = NotesMarkdown.cursorColor
         view.typingAttributes = NotesMarkdown.baseAttributes
         view.string = text
         view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         view.delegate = context.coordinator
         view.onFocusChange = onFocusChange
+        view.vimEnabled = vimMotions
         view.restyle()
         view.wantsFocus = wantsFocus
         scroll.documentView = view
@@ -443,7 +449,10 @@ struct MarkdownEditor: NSViewRepresentable {
         // Off while the Notes page isn't the one showing (SwiftUI's .disabled doesn't reach AppKit views).
         view.isEditable = context.environment.isEnabled
         view.isSelectable = context.environment.isEnabled
-        if view.string != text { coordinator.show(text, in: view) }
+        view.vimEnabled = vimMotions
+        // While a Japanese (or other) input method is still composing, the box holds text the
+        // binding doesn't have yet (it only gets it on commit). Syncing now would wipe that text.
+        if !view.hasMarkedText(), view.string != text { coordinator.show(text, in: view) }
         view.wantsFocus = wantsFocus
         if blurRequest != coordinator.blurRequest {
             coordinator.blurRequest = blurRequest
@@ -469,6 +478,13 @@ struct MarkdownEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard !isApplying, let view = notification.object as? MarkdownTextView else { return }
+            // "[] " becomes a checkbox; return on a list or quote line starts the next one (Tab
+            // indents it). Done here, where the cursor shows which line the return was typed on.
+            if let fixed = Checklist.autoFormat(old: parent.text, new: view.string, cursor: view.selectedRange().location) {
+                show(fixed, in: view)
+                parent.text = fixed
+                return
+            }
             if parent.text != view.string { parent.text = view.string }
             view.restyle()
         }
@@ -537,6 +553,22 @@ final class MarkdownTextView: NSTextView {
         didSet { if wantsFocus != oldValue { focusIfWanted() } }
     }
 
+    /// Vim keys are on (settings → Text editor → Vim motions).
+    var vimEnabled = false {
+        didSet {
+            guard vimEnabled != oldValue else { return }
+            vim.reset()
+            restyle()
+        }
+    }
+    private var vim = Vim()
+    /// The block cursor is lit (it goes on and off while it blinks).
+    private var blockLit = true
+    /// The last key or cursor move. In insert mode the block stays lit while you type and blinks
+    /// once you stop; in normal and visual mode it never blinks. That's how you tell them apart.
+    private var lastActivity = Date.distantPast
+    private var blinkTimer: Timer?
+
     /// Styles the whole note again. Skipped while a Japanese (or other) input method is still
     /// composing, so its underline isn't wiped; it runs again when the text is committed.
     func restyle() {
@@ -549,7 +581,9 @@ final class MarkdownTextView: NSTextView {
         let cursor = selectedRange().location
         let inCode = drawn.codeBoxes.contains { cursor >= $0.location && cursor <= $0.upperBound }
         typingAttributes = inCode ? NotesMarkdown.codeTypingAttributes : NotesMarkdown.baseAttributes
-        insertionPointColor = inCode ? .black : .white
+        lastActivity = Date()
+        blockLit = true
+        updateCursor()
         needsDisplay = true
     }
 
@@ -561,7 +595,8 @@ final class MarkdownTextView: NSTextView {
             let lineStart = text.lineRange(for: NSRange(location: lead.location, length: 0)).location
             // Right before an indented marker is a real place (it shows as the indent).
             if location == lead.location && lead.location > lineStart { return location }
-            let movingLeft = old.length == 0 && old.location == lead.upperBound
+            // (Vim's h stops at the start of the text instead.)
+            let movingLeft = !vimCommands && old.length == 0 && old.location == lead.upperBound
             if movingLeft && lineStart > 0 { return lineStart - 1 }
             return lead.upperBound
         }
@@ -636,6 +671,12 @@ final class MarkdownTextView: NSTextView {
             NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5).fill()
         }
 
+        // Vim's block cursor: solid, behind the character it's on (which `updateCursor` turns black).
+        if showsBlock, blockLit, let block = vimBlock() {
+            NotesMarkdown.cursorColor.setFill()
+            NSBezierPath(roundedRect: block, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+
         super.draw(dirtyRect)
 
         // On top: bullets, checkboxes, "---" lines.
@@ -659,6 +700,216 @@ final class MarkdownTextView: NSTextView {
             guard let line = band(range) else { continue }
             NSRect(x: origin.x, y: line.midY.rounded(.down), width: width, height: 1).fill()
         }
+
+        // While an input method composes (the underlined text), a thin orange bar where you type.
+        if vimEnabled, hasFocus, hasMarkedText(), let bar = composingCaret() {
+            NotesMarkdown.cursorColor.setFill()
+            bar.fill()
+        }
+    }
+
+    // MARK: Vim
+
+    /// Normal or visual mode: keys are commands.
+    private var vimCommands: Bool { vimEnabled && vim.mode != .insert }
+
+    /// With Vim on, the cursor is a solid block in every mode (not while an input method is
+    /// composing: then it's the usual thin cursor, inside the underlined text).
+    private var showsBlock: Bool {
+        vimEnabled && hasFocus && !hasMarkedText() && selectedRange().length == 0
+    }
+
+    /// Puts the cursor's look in place: the block (with its character in black) or the thin
+    /// cursor, and the blink timer.
+    private func updateCursor() {
+        // With Vim on, Ledge draws every cursor itself (see `draw(_:)`); macOS's own cursor didn't
+        // reliably come back while a Japanese input method was composing.
+        insertionPointColor = vimEnabled ? .clear : NotesMarkdown.cursorColor
+        if let layoutManager, let storage = textStorage {
+            layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: storage.length))
+            let text = string as NSString
+            let at = selectedRange().location
+            if showsBlock, blockLit, at < text.length {
+                let character = text.rangeOfComposedCharacterSequence(at: at)
+                if text.substring(with: character).rangeOfCharacter(from: .newlines) == nil {
+                    layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor.black, forCharacterRange: character)
+                }
+            }
+        }
+        // The whole box: the block may have moved, and its old spot has to clear too.
+        needsDisplay = true
+        // Only insert mode blinks: a steady block means normal mode.
+        let wantsBlink = vimEnabled && hasFocus && vim.mode == .insert
+        if !wantsBlink { blockLit = true }
+        if wantsBlink && blinkTimer == nil {
+            blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.blink() }
+            }
+        } else if !wantsBlink, let timer = blinkTimer {
+            timer.invalidate()
+            blinkTimer = nil
+        }
+    }
+
+    /// A Japanese (or other) input method starts or changes its underlined text. It often does
+    /// this a moment after the key press, so the cursor is switched here: the thin cursor while
+    /// composing, the block again after.
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        if vimEnabled { updateCursor() }
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        if vimEnabled { updateCursor() }
+    }
+
+    /// Every half second in insert mode: on and off once you've stopped typing for a moment, lit while you type.
+    private func blink() {
+        let idle = Date().timeIntervalSince(lastActivity) > 0.5
+        let lit = idle ? !blockLit : true
+        guard lit != blockLit else { return }
+        blockLit = lit
+        updateCursor()
+    }
+
+    /// Vim has a use for Esc right now: back to normal mode, or dropping a half typed command.
+    /// Otherwise Esc is left to the island (it closes it).
+    var vimWantsEscape: Bool { vimEnabled && hasFocus && !hasMarkedText() && vim.wantsEscape }
+
+    /// Whether this key goes straight to Vim, ahead of Ledge's typing helpers (Tab, "[", "`",
+    /// backspace; see `IslandController`): any key without ⌘ outside insert mode, and Esc when
+    /// Vim wants it.
+    func takesVimKey(_ event: NSEvent) -> Bool {
+        guard vimEnabled, hasFocus, !hasMarkedText() else { return false }
+        if event.keyCode == 53 { return vim.wantsEscape }
+        if event.modifierFlags.contains(.command) { return false }
+        return vim.mode != .insert
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // While a Japanese (or other) input method is composing, every key is its own.
+        guard vimEnabled, !hasMarkedText(), let key = vimKey(for: event) else {
+            super.keyDown(with: event)
+            // While composing, `restyle` waits for the commit; the cursor still has to follow.
+            if vimEnabled {
+                lastActivity = Date()
+                blockLit = true
+                updateCursor()
+            }
+            return
+        }
+        switch vim.handle(key, text: string, selection: selectedRange()) {
+        case .pass:
+            super.keyDown(with: event)
+        case .wait:
+            break
+        case .undo:
+            if undoManager?.canUndo == true { undoManager?.undo() }
+            // Undo selects what came back; Vim just puts the cursor there.
+            setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+        case .redo:
+            if undoManager?.canRedo == true { undoManager?.redo() }
+            setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+        case .apply(let edit, let selection):
+            applyVim(edit: edit, selection: selection)
+        }
+        restyle()
+    }
+
+    /// Makes Vim's change as one undo step, then moves the cursor or the selection.
+    private func applyVim(edit: Vim.Edit?, selection: NSRange) {
+        func select() {
+            let length = (string as NSString).length
+            let location = min(selection.location, length)
+            setSelectedRange(NSRange(location: location, length: min(selection.length, length - location)))
+        }
+        if let edit {
+            breakUndoCoalescing()
+            if shouldChangeText(in: edit.range, replacementString: edit.text) {
+                replaceCharacters(in: edit.range, with: edit.text)
+                // The cursor moves before the change is announced, like typing: the typing helpers
+                // look at it ("o" on a list or quote line starts the next item, like return).
+                select()
+                didChangeText()
+            }
+            breakUndoCoalescing()
+        } else {
+            select()
+        }
+        scrollRangeToVisible(selectedRange())
+    }
+
+    /// The key as Vim names it ("w", "G", "<Esc>", "<C-r>"), or nil to leave it to the text view:
+    /// typing in insert mode, ⌘ and ⌥ keys, and keys like Home or Page Down.
+    private func vimKey(for event: NSEvent) -> String? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.option) { return nil }
+        // With Shift: "G", "$"; a Japanese input mode doesn't change these (it hasn't seen the key yet).
+        let plain = event.charactersIgnoringModifiers ?? ""
+        if event.keyCode == 53 || (flags.contains(.control) && (plain == "[" || plain == "c")) { return "<Esc>" }
+        if vim.mode == .insert { return nil }
+        if flags.contains(.control) { return plain == "r" ? "<C-r>" : nil }
+        switch event.keyCode {
+        case 36, 76: return "<CR>"
+        case 51: return "<BS>"
+        case 48: return "<Tab>"
+        case 117: return "x"
+        case 123: return "h"
+        case 124: return "l"
+        case 125: return "j"
+        case 126: return "k"
+        default: break
+        }
+        guard plain.count == 1, let scalar = plain.unicodeScalars.first, scalar.value < 0xF700 else { return nil }
+        return plain
+    }
+
+    /// The thin cursor inside the underlined text an input method is composing.
+    private func composingCaret() -> NSRect? {
+        guard let window else { return nil }
+        let onScreen = firstRect(forCharacterRange: NSRange(location: selectedRange().location, length: 0), actualRange: nil)
+        guard onScreen.height > 0 else { return nil }
+        let here = convert(window.convertFromScreen(onScreen), from: nil)
+        let base = NotesMarkdown.baseFont
+        return NSRect(x: here.minX - 1, y: here.minY, width: 2, height: min(here.height, base.ascender - base.descender + 2))
+    }
+
+    /// Where the block cursor goes: over the character under the cursor, or one character wide
+    /// at the end of a line.
+    private func vimBlock() -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let text = string as NSString
+        let at = selectedRange().location
+        let origin = textContainerOrigin
+        let narrow = ("x" as NSString).size(withAttributes: [.font: NotesMarkdown.baseFont]).width
+        let base = NotesMarkdown.baseFont
+        let endsWithBreak = text.length > 0
+            && text.substring(with: text.rangeOfComposedCharacterSequence(at: text.length - 1)).rangeOfCharacter(from: .newlines) != nil
+        if at >= text.length && (text.length == 0 || endsWithBreak) {
+            // An empty note, or the empty line after a last line break.
+            layoutManager.ensureLayout(for: textContainer)
+            let extra = layoutManager.extraLineFragmentRect
+            guard extra.height > 0 else { return nil }
+            return NSRect(x: origin.x + extra.minX, y: origin.y + extra.minY,
+                          width: narrow, height: base.ascender - base.descender)
+        }
+        // At the very end of the note there's no character to sit on: the block goes right after
+        // the last one, on its line.
+        let atEnd = at >= text.length
+        let index = atEnd ? text.length - 1 : at
+        let characters = text.rangeOfComposedCharacterSequence(at: index)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let box = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        let baseline = origin.y + line.minY + layoutManager.location(forGlyphAt: glyphs.location).y
+        var font = (textStorage?.attribute(.font, at: characters.location, effectiveRange: nil) as? NSFont) ?? base
+        if font.pointSize < 1 { font = base }
+        let isBreak = text.substring(with: characters).rangeOfCharacter(from: .newlines) != nil
+        let width = atEnd || isBreak || box.width < 1 ? narrow : box.width
+        let x = atEnd ? box.maxX : box.minX
+        return NSRect(x: origin.x + x, y: baseline - font.ascender, width: width, height: font.ascender - font.descender)
     }
 
     // MARK: Clicks
@@ -752,6 +1003,8 @@ final class MarkdownTextView: NSTextView {
     private func setFocus(_ now: Bool) {
         guard now != hasFocus else { return }
         hasFocus = now
+        // Vim starts each visit in normal mode.
+        if now { vim.reset() }
         LedgeLog.shared.write("notes: the note \(now ? "has" : "lost") the cursor")
         restyle()
         let report = onFocusChange

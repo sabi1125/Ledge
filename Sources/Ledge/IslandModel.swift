@@ -13,6 +13,8 @@ enum HUD: Equatable {
     case awakeOn(minutes: Int)
     case pomodoro(ended: PomodoroPhase, next: PomodoroPhase, minutes: Int)
     case awakeOff
+    /// Files went into the tray ("Holding 2 files in tray"), or didn't fit (`full`).
+    case tray(text: String, full: Bool)
 }
 
 /// Everything the island view needs to draw itself.
@@ -122,8 +124,25 @@ final class IslandModel: ObservableObject {
     private var collapseTimer: Timer?
     /// Watches whether the to-do list is long enough for the bigger island.
     private var todoCountWatch: AnyCancellable?
+    private var trayWatch: AnyCancellable?
+
+    /// Files being dragged toward this island (set by the controller while a Finder drag is near).
+    @Published private(set) var fileDrag: FileDrag?
+
+    /// The open island has the tray area under its page: the tray is shown and holding something,
+    /// or files are being dragged over it (the drop box takes its place).
+    var trayArea: Bool {
+        guard Pref.bool(Pref.trayEnabled) else { return false }
+        if fileDrag != nil { return true }
+        let tray = TrayStore.shared
+        return tray.isShown && !tray.items.isEmpty
+    }
+    private var lastTrayArea = false
 
     init() {
+        // The tray showing or hiding changes the open island's height.
+        trayWatch = TrayStore.shared.objectWillChange
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.trayChanged() } }
         // More than 2 to-dos: the list gets the bigger island, so they're all in view at once.
         todoCountWatch = RemindersStore.shared.$items
             .map { $0.count > Self.shortTodoListLimit }
@@ -132,6 +151,82 @@ final class IslandModel: ObservableObject {
                 // $items fires before the new list is stored, so look again on the next turn.
                 DispatchQueue.main.async { self?.recompute() }
             }
+    }
+
+    private func trayChanged() {
+        let area = trayArea
+        objectWillChange.send()
+        guard area != lastTrayArea else { return }
+        lastTrayArea = area
+        // The island changes height: text boxes wait for it to settle (see `isSettled`).
+        if isExpanded { unsettle() }
+    }
+
+    /// The controller saw a file drag come near (or leave, with nil).
+    func setFileDrag(_ drag: FileDrag?) {
+        guard drag != fileDrag else { return }
+        fileDrag = drag
+        recompute()
+        trayChanged()
+    }
+
+    /// The pointer is over the drop target, or left it.
+    func setFileDragOver(_ over: Bool) {
+        guard var d = fileDrag, d.over != over else { return }
+        d.over = over
+        fileDrag = d
+    }
+
+    /// Files dropped on the island go into the tray: all of them, or none if they don't fit.
+    /// The tray stays hidden; dropped on the closed island, the indicator says what it holds.
+    func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard Pref.bool(Pref.trayEnabled), !isShowingSettings, !providers.isEmpty else { return false }
+        let tray = TrayStore.shared
+        tray.prune()
+        let fromClosed = !isExpanded
+        guard TrayText.fits(adding: providers.count, held: tray.items.count) else {
+            LedgeLog.shared.write("tray: \(providers.count) dropped, doesn't fit (holding \(tray.items.count))")
+            setFileDrag(nil)
+            if fromClosed { show(.tray(text: "Tray is full · holds \(TrayText.limit)", full: true)) }
+            return false
+        }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for p in providers {
+                if let url = await Self.loadFileURL(p) { urls.append(url) }
+            }
+            let added = tray.add(urls)
+            self.setFileDrag(nil)
+            if fromClosed {
+                show(.tray(text: added ? tray.holdingText : "Tray is full · holds \(TrayText.limit)", full: !added))
+            }
+        }
+        return true
+    }
+
+    nonisolated private static func loadFileURL(_ provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { c in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in c.resume(returning: url) }
+        }
+    }
+
+    /// ⌃⌥F: shows or hides the tray under the open page. With the island closed, it opens on
+    /// your last page with the tray showing. An empty tray just says so.
+    func toggleTray() {
+        guard Pref.bool(Pref.trayEnabled), !isNoteEnlarged else { return }
+        let tray = TrayStore.shared
+        tray.prune()
+        if tray.items.isEmpty {
+            if !isExpanded { show(.tray(text: TrayText.empty, full: false)) }
+            return
+        }
+        if isShowingSettings { closeSettings() }
+        if isExpanded {
+            tray.isShown.toggle()
+        } else {
+            tray.isShown = true
+            expand(force: true)
+        }
     }
 
     /// Up to this many to-dos fit the normal open island; more get the bigger one.
@@ -301,7 +396,7 @@ final class IslandModel: ObservableObject {
         beginNotesTyping()
     }
 
-    /// A click outside (or another way of leaving): the enlarged note closes all the way.
+    /// ⌘L (or another way of leaving): the enlarged note closes all the way.
     func closeEnlargedNote() {
         guard isNoteEnlarged else { return }
         LedgeLog.shared.write("notes: enlarged note closed")
@@ -317,7 +412,7 @@ final class IslandModel: ObservableObject {
         // The island while the note is enlarged: the note comes back into it.
         if isNoteEnlarged { shrinkNote(); return }
         if isExpanded {
-            // Clicks inside the open island never close it; a click outside does (see the controller).
+            // Clicks never close the open island, inside or outside: only ⌘L and Esc do.
             return
         } else {
             expand(force: true)
@@ -483,6 +578,7 @@ final class IslandModel: ObservableObject {
         case .timerDone: return 6
         case .awakeOn, .awakeOff: return 1.8
         case .pomodoro: return 4
+        case .tray(_, let full): return full ? 2.4 : 1.6
         }
     }
 
@@ -602,7 +698,7 @@ final class IslandModel: ObservableObject {
         }
     }
 
-    /// Once open, the island stays open until you click outside it (or press Esc), so moving the
+    /// Once open, the island stays open until you press ⌘L or Esc, so moving the
     /// pointer away by mistake never closes it or loses what you're typing.
     private func collapseIfIdle() {}
 
@@ -621,6 +717,8 @@ final class IslandModel: ObservableObject {
             // A long to-do list gets the bigger island too, so every to-do shows without scrolling.
             else if showsLongTodoList { next = .expandedTall }
             else { next = .expanded }
+        } else if fileDrag != nil {
+            next = .drop
         } else if hud != nil {
             next = .hud
         } else if (hasMedia && media.isPlaying) || timerActive {
@@ -653,12 +751,17 @@ final class IslandModel: ObservableObject {
             let p = NSEvent.mouseLocation
             LedgeLog.shared.write("island: \(shape) -> \(next) page \(page.rawValue) (pointer \(Int(p.x)),\(Int(p.y)) buttons \(NSEvent.pressedMouseButtons) hover \(isHovering) typing \(isTyping) playing \(media.isPlaying))")
             shape = next
-            isSettled = false
-            settleTimer?.invalidate()
-            // Longer than the slowest open or resize in any animation style.
-            settleTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.isSettled = true }
-            }
+            unsettle()
+        }
+    }
+
+    /// The island is about to move: text boxes are drawn as plain text until it settles.
+    private func unsettle() {
+        isSettled = false
+        settleTimer?.invalidate()
+        // Longer than the slowest open or resize in any animation style.
+        settleTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.isSettled = true }
         }
     }
 }

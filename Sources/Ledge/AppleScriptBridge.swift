@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Runs AppleScript with `osascript`, one at a time on a background queue, so talking to Notes or
 /// Reminders never stalls the island. macOS asks once per app ("Ledge wants to control Notes").
@@ -24,6 +24,7 @@ enum AppleScriptBridge {
     }
 
     private static func runNow(_ script: String, _ args: [String]) -> Result<String, Failure> {
+        startHiddenIfNeeded(for: script)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         // Each line as its own -e; anything after the script is passed to `on run argv`.
@@ -46,6 +47,54 @@ enum AppleScriptBridge {
         LedgeLog.shared.write("applescript: failed: \(message)")
         return .failure(Failure(message: message,
                                 notAllowed: message.contains("-1743") || message.localizedCaseInsensitiveContains("not allowed")))
+    }
+}
+
+extension AppleScriptBridge {
+    /// "tell application Notes" opens Notes like a normal app (window and all) when it isn't
+    /// running. So unless the script means to show it (it says `activate`), Ledge starts the app
+    /// first itself: hidden, in the background, with no window coming up.
+    fileprivate static func startHiddenIfNeeded(for script: String) {
+        guard !script.contains("activate") else { return }
+        let apps = [("Notes", "com.apple.Notes"), ("Reminders", "com.apple.reminders")]
+        guard let (_, bundleID) = apps.first(where: { script.contains("application \"\($0.0)\"") }),
+              NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
+        config.hides = true
+        config.addsToRecentItems = false
+        config.createsNewApplicationInstance = false
+        let done = DispatchSemaphore(value: 0)
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
+            if let error { LedgeLog.shared.write("applescript: couldn't start \(bundleID) hidden: \(error.localizedDescription)") }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 5)
+        LedgeLog.shared.write("applescript: started \(bundleID) hidden in the background")
+        startedHidden.insert(bundleID)
+        // Some apps show a window anyway while they start up: hide it again for a few seconds,
+        // unless you've brought the app forward yourself in the meantime.
+        DispatchQueue.main.async {
+            for step in 1...15 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(step) * 0.2) {
+                    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
+                          !app.isActive, !app.isHidden else { return }
+                    LedgeLog.shared.write("applescript: \(bundleID) showed itself while starting; hiding it again")
+                    app.hide()
+                }
+            }
+        }
+    }
+
+    /// Apps Ledge started hidden in the background (not ones you opened). Read on the main thread.
+    nonisolated(unsafe) static var startedHidden = Set<String>()
+
+    /// The app is one Ledge started in the background and you haven't opened since.
+    static func isBackgroundHelper(_ app: NSRunningApplication) -> Bool {
+        guard let id = app.bundleIdentifier, startedHidden.contains(id) else { return false }
+        if !app.isHidden { startedHidden.remove(id) } // you've shown it: it's yours now
+        return app.isHidden
     }
 }
 

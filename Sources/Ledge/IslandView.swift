@@ -1,6 +1,7 @@
 import AppKit
 import LedgeCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The black island outline. On the notch: a rounded-bottom rectangle with small outward
 /// "shoulders" at the top corners, like the real notch. Floating (no shoulders): a pill or
@@ -68,11 +69,13 @@ struct IslandRootView: View {
     @State private var lastMove = Date.distantPast
     @State private var tracksWidth = false
     @State private var tracksHeight = false
+    /// Files are being dragged over the island (SwiftUI's drop target says so).
+    @State private var dropOver = false
 
     private var target: IslandGeometry {
         let shape = model.shape, style = model.style
         let size = IslandLayout.size(for: shape, notch: model.notch, style: style, compactWidth: model.compactWidth,
-                                     switcherSize: model.switcher?.size)
+                                     switcherSize: model.switcher?.size, tray: model.trayArea)
         return IslandGeometry(width: size.width, height: size.height,
                               bottomRadius: IslandLayout.bottomRadius(for: shape, notch: model.notch, style: style),
                               topRadius: IslandLayout.topRadius(for: shape, notch: model.notch, style: style),
@@ -107,13 +110,16 @@ struct IslandRootView: View {
         .frame(width: w + s * 2, height: h, alignment: .top)
         .clipShape(outline)
         .contentShape(outline)
-        .shadow(color: .black.opacity(shape.isOpen || shape == .settings ? 0.5 : 0), radius: 16, y: 6)
+        .shadow(color: .black.opacity(shape.isOpen || shape == .settings || shape == .drop ? 0.5 : 0), radius: 16, y: 6)
         .onTapGesture { model.clicked() }
         .contextMenu {
             Button("Ledge Settings…", action: openSettings)
             Divider()
             Button("Quit Ledge") { NSApp.terminate(nil) }
         }
+        // Files dropped anywhere on the island go into the tray.
+        .onDrop(of: [UTType.fileURL], isTargeted: $dropOver) { providers in model.acceptDrop(providers) }
+        .onChange(of: dropOver) { _, over in model.setFileDragOver(over) }
         .padding(.top, IslandLayout.topGap(style: style))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
@@ -211,7 +217,8 @@ struct IslandRootView: View {
                     .transition(Self.fade)
             }
         case .expanded, .expandedTall, .expandedNotes:
-            let full = IslandLayout.size(for: model.lastOpenShape, notch: model.notch, style: model.style)
+            let full = IslandLayout.size(for: model.lastOpenShape, notch: model.notch, style: model.style,
+                                         tray: model.trayArea)
             // Between two open sizes the content's frame is the shape's own animated size, so the
             // top bar and edges move in lockstep with the black shape. Otherwise it keeps its full
             // size and the shape opens and closes over it.
@@ -229,6 +236,10 @@ struct IslandRootView: View {
         case .settings:
             SettingsPanel(model: model, state: settings, updater: updater)
                 .fixedFrame(for: .settings, model: model)
+                .transition(Self.fade)
+        case .drop:
+            DropTargetView(model: model)
+                .fixedFrame(for: .drop, model: model)
                 .transition(Self.fade)
         case .idle, .hover:
             Color.clear
@@ -556,6 +567,18 @@ struct HUDView: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(Color(white: 0.75))
+        case let .tray(text, full):
+            HStack(spacing: 7 * k) {
+                Image(systemName: "tray").font(.system(size: 12 * k, weight: .semibold))
+                Text(text).font(.system(size: 12.5 * k, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 4)
+                if !full {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12 * k)).foregroundStyle(Theme.green)
+                }
+            }
+            .foregroundStyle(full ? Theme.amber : .white)
         case let .timerDone(duration):
             HStack(spacing: 7 * k) {
                 Image(systemName: "bell.fill").font(.system(size: 12 * k, weight: .semibold))

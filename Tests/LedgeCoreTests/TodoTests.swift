@@ -91,6 +91,17 @@ final class TodoTests: XCTestCase {
         XCTAssertEqual(Checklist.autoFormat(old: "- bullet", new: "- bullet\n"), "- bullet\n- ")
         XCTAssertNil(Checklist.autoFormat(old: "plain", new: "plain\n"))
     }
+
+    func testReturnWithALineBelowUsesTheCursor() {
+        // Return at the end of "> a" (cursor 4, after the new line break), with "next" below.
+        XCTAssertEqual(Checklist.autoFormat(old: "> a\nnext", new: "> a\n\nnext", cursor: 4), "> a\n> \nnext")
+        XCTAssertEqual(Checklist.autoFormat(old: "- a\nnext", new: "- a\n\nnext", cursor: 4), "- a\n- \nnext")
+        XCTAssertEqual(Checklist.autoFormat(old: "1. a\n\nnext", new: "1. a\n\n\nnext", cursor: 5), "1. a\n2. \n\nnext")
+        // Return on the empty line under it: nothing to continue.
+        XCTAssertNil(Checklist.autoFormat(old: "> a\n\nnext", new: "> a\n\n\nnext", cursor: 5))
+        // Japanese before the return counts the same (UTF-16 positions).
+        XCTAssertEqual(Checklist.autoFormat(old: "> 日本\nnext", new: "> 日本\n\nnext", cursor: 5), "> 日本\n> \nnext")
+    }
 }
 
 final class NoteLinksTests: XCTestCase {

@@ -18,7 +18,7 @@ final class SettingsState: ObservableObject {
 /// folder, or a right-click on the island). A sidebar of sections on the left, one section on the right.
 struct SettingsPanel: View {
     enum Section: String, CaseIterable, Identifiable {
-        case pages, indicators, animation, switcher, pomodoro, awake, general
+        case pages, indicators, animation, switcher, pomodoro, awake, editor, general
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -27,6 +27,7 @@ struct SettingsPanel: View {
             case .animation: return "Animation"
             case .pomodoro: return "Pomodoro"
             case .awake: return "Stay awake"
+            case .editor: return "Text editor"
             case .general: return "General"
             case .switcher: return "Switcher"
             }
@@ -38,6 +39,7 @@ struct SettingsPanel: View {
             case .animation: return "sparkles"
             case .pomodoro: return "target"
             case .awake: return "cup.and.saucer"
+            case .editor: return "character.cursor.ibeam"
             case .general: return "slider.horizontal.3"
             case .switcher: return "rectangle.on.rectangle"
             }
@@ -53,6 +55,7 @@ struct SettingsPanel: View {
     @AppStorage(Pref.pageCalendar) private var pageCalendar = true
     @AppStorage(Pref.pageTimer) private var pageTimer = true
     @AppStorage(Pref.pageNotes) private var pageNotes = true
+    @AppStorage(Pref.trayEnabled) private var trayEnabled = true
     // Indicators
     @AppStorage(Pref.showVolume) private var showVolume = true
     @AppStorage(Pref.showBrightness) private var showBrightness = true
@@ -78,6 +81,8 @@ struct SettingsPanel: View {
     @AppStorage(Pref.pomoLong) private var pomoLong = 15
     @AppStorage(Pref.pomoSessions) private var pomoSessions = 4
     @AppStorage(Pref.pomoAutoStart) private var pomoAutoStart = true
+    // Text editor
+    @AppStorage(Pref.vimMotions) private var vimMotions = false
 
     @State private var section: Section = SettingsPanel.startSection
     @Namespace private var highlight
@@ -160,8 +165,10 @@ struct SettingsPanel: View {
                     SwitchRow(title: "Timer", symbol: "timer", isOn: $pageTimer)
                     CardDivider()
                     SwitchRow(title: "Notes", symbol: "note.text", isOn: $pageNotes)
+                    CardDivider()
+                    SwitchRow(title: "Tray", symbol: "tray", isOn: $trayEnabled)
                 }
-                hint("Swipe with two fingers on the open island to switch pages.")
+                hint("Swipe with two fingers to switch pages. Tray: drop up to 5 files on the notch; ⌃⌥F shows them.")
             case .indicators:
                 Card {
                     SwitchRow(title: "Volume", symbol: "speaker.wave.2.fill", isOn: $showVolume)
@@ -242,6 +249,11 @@ struct SettingsPanel: View {
                     .padding(.leading, 4)
                 }
                 hint("Hold the shortcut's modifier and tap its key to move (⇧ goes back), let go to switch. Esc cancels.")
+            case .editor:
+                Card {
+                    SwitchRow(title: "Vim motions", symbol: "keyboard", isOn: $vimMotions)
+                }
+                hint("In the Notes page. The note opens in normal mode: i to type, Esc to stop.")
             case .general:
                 Card {
                     SwitchRow(title: "Open at login", symbol: "power", isOn: $state.launchAtLogin)
