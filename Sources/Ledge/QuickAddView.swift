@@ -348,7 +348,7 @@ struct QuickAddView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                 } else {
-                    // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                    // While the island is still moving: a picture of the text box (see `MarkdownPreview`).
                     MarkdownPreview(text: notes)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)

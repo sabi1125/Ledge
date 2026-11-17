@@ -743,11 +743,12 @@ struct NotesPage: View {
                             if now { wantsBodyFocus = false }
                         }
                     } else {
-                        // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                        // While the island is still moving: a picture of the text box (see `MarkdownPreview`).
                         MarkdownPreview(text: notes.text)
                     }
                     if notes.text.isEmpty {
-                        Text("Jot something down… type [] for a checkbox")
+                        Text(notes.isSlow ? "Waiting for the Notes app… it can take a few seconds after it's been idle"
+                             : notes.isWaiting ? "Loading…" : "Jot something down… type [] for a checkbox")
                             .font(.system(size: 13))
                             .foregroundStyle(Color(white: 0.42))
                             .allowsHitTesting(false)

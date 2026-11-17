@@ -41,6 +41,14 @@ final class NotesStore: ObservableObject {
     @Published var text = "" { didSet { if !isLoading && text != oldValue { scheduleSave() } } }
 
     private var isLoading = false
+    /// Nothing to show yet: Notes is still answering (the list, or a note not read before).
+    @Published private(set) var isWaiting = false
+    /// …for more than a moment (Notes can take several seconds after it's been idle).
+    @Published private(set) var isSlow = false
+    private var slowWork: DispatchWorkItem?
+    /// The note whose text hasn't come from Notes yet. Nothing is saved to it until it has, or
+    /// what you typed meanwhile would replace the whole note.
+    private var bodyPending: String?
     /// The text of notes already read from Notes, so opening one shows it at once (no blank flash
     /// while Notes answers).
     private var cache: [String: (title: String, text: String)] = [:]
@@ -74,6 +82,7 @@ final class NotesStore: ObservableObject {
     func refresh() {
         guard !isSample, !refreshing else { return }
         refreshing = true
+        if items.isEmpty { startWaiting() }
         AppleScriptBridge.run(AppleScripts.listNotes) { result in
             DispatchQueue.main.async { [weak self] in
                 self?.refreshing = false
@@ -83,6 +92,7 @@ final class NotesStore: ObservableObject {
     }
 
     private func applyList(_ result: Result<String, AppleScriptBridge.Failure>) {
+        stopWaiting()
         switch result {
         case .failure(let f):
             status = f.notAllowed ? .notAllowed : .failed(f.message)
@@ -113,16 +123,31 @@ final class NotesStore: ObservableObject {
         UserDefaults.standard.set(id, forKey: Self.lastNoteKey)
         // Show what we already have straight away; then check Notes for anything newer.
         if let kept = cache[id] {
+            bodyPending = nil
             show(title: kept.title, text: kept.text, id: id)
-        } else if let item = items.first(where: { $0.id == id }) {
-            show(title: item.title, text: "", id: id)
+        } else {
+            bodyPending = id
+            startWaiting()
+            if let item = items.first(where: { $0.id == id }) { show(title: item.title, text: "", id: id) }
         }
         AppleScriptBridge.run(AppleScripts.readNote, [id]) { result in
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.selectedID == id, !self.dirty, case .success(let plain) = result else { return }
+                guard let self, self.selectedID == id else { return }
+                let wasPending = self.bodyPending == id
+                if wasPending { self.bodyPending = nil; self.stopWaiting() }
+                guard case .success(let plain) = result else { return }
                 let note = NoteFormat.split(plaintext: plain)
                 self.cache[id] = (note.title, note.body)
-                self.show(title: note.title, text: note.body, id: id)
+                if !self.dirty {
+                    self.show(title: note.title, text: note.body, id: id)
+                } else if wasPending {
+                    // You typed before the note arrived: keep the note, with your words after it.
+                    let typed = self.text
+                    let joined = note.body.isEmpty || typed.isEmpty ? note.body + typed : note.body + "\n" + typed
+                    let title = self.title == (self.items.first { $0.id == id }?.title ?? note.title) ? note.title : self.title
+                    self.show(title: title, text: joined, id: id)
+                    self.scheduleSave()
+                }
             }
         }
     }
@@ -135,6 +160,22 @@ final class NotesStore: ObservableObject {
         if text != newText { text = newText }
         isLoading = false
         dirty = false
+    }
+
+    private func startWaiting() {
+        isWaiting = true
+        slowWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { if self?.isWaiting == true { self?.isSlow = true } }
+        }
+        slowWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    private func stopWaiting() {
+        slowWork?.cancel()
+        isWaiting = false
+        isSlow = false
     }
 
     // MARK: Writing
@@ -169,6 +210,8 @@ final class NotesStore: ObservableObject {
     func saveNow(wait: Bool = false) {
         saveWork?.cancel()
         guard dirty, !isSample, let id = selectedID else { return }
+        // Its text hasn't come from Notes yet: saving now would replace it with only what you typed.
+        guard bodyPending != id else { return }
         dirty = false
         cache[id] = (title, text)
         let html = NoteFormat.html(title: title, body: text)

@@ -394,7 +394,7 @@ struct TodoDetail: View {
             if model.isSettled {
                 MarkdownEditor(text: $text, wantsFocus: false, blurRequest: 0) { _ in }
             } else {
-                // While the island is still moving: drawn by SwiftUI (see `IslandModel.isSettled`).
+                // While the island is still moving: a picture of the text box (see `MarkdownPreview`).
                 MarkdownPreview(text: text)
             }
             if text.isEmpty {
