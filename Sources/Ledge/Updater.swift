@@ -80,9 +80,33 @@ final class Updater: ObservableObject {
             p.currentDirectoryURL = folder
             do { try p.run() } catch {
                 await MainActor.run { self.state = .failed("Couldn't start the installer.") }
+                return
             }
+            await MainActor.run { self.watchInstall(log: log) }
         }
         LedgeLog.shared.write("updater: updating from \(Self.versionText)")
+    }
+
+    /// The installer runs on its own and restarts Ledge when it's done, so success needs no
+    /// answer. Failure would leave "Updating…" forever: watch its log for an error, and give up
+    /// waiting after a few minutes.
+    private func watchInstall(log: String) {
+        let started = Date()
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self, self.state == .updating else { timer.invalidate(); return }
+                let text = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+                let failed = ["errSec", "error:", "Build failed", "✗"].contains { text.contains($0) }
+                if failed || Date().timeIntervalSince(started) > 240 {
+                    timer.invalidate()
+                    let why = text.contains("errSec")
+                        ? "Signing failed (the keychain prompt wasn't answered?)."
+                        : (failed ? "The build failed." : "It's taking too long.")
+                    self.state = .failed("Update failed. \(why) See ~/Library/Logs/Ledge-update.log")
+                    LedgeLog.shared.write("updater: install didn't finish (\(why))")
+                }
+            }
+        }
     }
 
     nonisolated private static func git(_ args: [String], in folder: URL) -> (ok: Bool, out: String, err: String) {
@@ -96,9 +120,21 @@ final class Updater: ObservableObject {
         p.standardOutput = out
         p.standardError = err
         do { try p.run() } catch { return (false, "", error.localizedDescription) }
-        p.waitUntilExit()
+        // Read while git runs: waiting first would hang once git writes more than a pipe holds.
+        // (stderr on its own thread, so neither pipe can fill up while the other is read.)
+        let errData = ErrBox()
+        let reading = DispatchGroup()
+        reading.enter()
+        DispatchQueue.global().async {
+            errData.data = err.fileHandleForReading.readDataToEndOfFile()
+            reading.leave()
+        }
         let o = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let e = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        reading.wait()
+        p.waitUntilExit()
+        let e = String(data: errData.data, encoding: .utf8) ?? ""
         return (p.terminationStatus == 0, o, e)
     }
 }
+
+private final class ErrBox: @unchecked Sendable { var data = Data() }

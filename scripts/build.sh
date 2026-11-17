@@ -49,6 +49,19 @@ if ! security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""
   IDENTITY="-"
 fi
 echo "• Signing for this Mac"
-codesign --force --sign "$IDENTITY" "$APP/Contents/Resources/MediaBridge.dylib"
-codesign --force --sign "$IDENTITY" --identifier local.sabir.ledge "$APP"
+sign() {
+  if ! codesign --force --sign "$IDENTITY" "$@" > build/sign.log 2>&1; then
+    cat build/sign.log
+    if grep -q "errSecInternalComponent" build/sign.log; then
+      echo "✗ Signing failed: macOS asked whether codesign may use the '$IDENTITY' key, and it wasn't allowed in time."
+      echo "  Run this once (it asks for your Mac password), then build again; it won't ask again:"
+      echo "  security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db"
+    else
+      echo "✗ Signing failed (see above)"
+    fi
+    exit 1
+  fi
+}
+sign "$APP/Contents/Resources/MediaBridge.dylib"
+sign --identifier local.sabir.ledge "$APP"
 echo "✓ Built $APP"

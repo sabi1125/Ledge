@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.registerDefaults()
+        PrivateAPIs.report()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         LedgeLog.shared.write("Ledge \(version) started")
 
@@ -189,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        defer { LedgeLog.shared.flush() }
         notes.saveNow(wait: true)
         media.stop()
         hider.stop()

@@ -45,6 +45,10 @@ final class WindowCatalog {
     private var real = Set<CGWindowID>()
     /// Windows found not to be standard (helpers, strips), or not found at all.
     private var notReal = Set<CGWindowID>()
+    /// Windows put in `notReal` only because they couldn't be found on another desktop (not
+    /// because the app said they aren't windows), and when: they're checked again later, so a
+    /// real window that was hard to find can't stay out of the switcher for good.
+    private var unsure: [CGWindowID: Date] = [:]
     /// Each real window's Accessibility handle, found by the scan on whichever desktop it's on.
     /// Raising a window through it takes macOS to that window's desktop, even between two windows
     /// of the same app in full screen (where making the app active does nothing: it already is).
@@ -96,6 +100,13 @@ final class WindowCatalog {
         let alive = Set(candidates.map(\.id))
         real.formIntersection(alive)
         notReal.formIntersection(alive)
+        unsure = unsure.filter { alive.contains($0.key) }
+        // Not found on another desktop two minutes ago: look again (also once it's on screen).
+        let onScreen = Set(candidates.filter(\.isOnScreen).map(\.id))
+        for (id, when) in unsure where Date().timeIntervalSince(when) > 120 || onScreen.contains(id) {
+            notReal.remove(id)
+            unsure[id] = nil
+        }
         // Forget closed windows and quit apps (previews are a few MB each).
         let allIDs = Set(Self.rawWindows(onScreenOnly: false).map(\.id))
         previews = previews.filter { allIDs.contains($0.key) }
@@ -108,7 +119,7 @@ final class WindowCatalog {
         scanning = true
         let byApp = Dictionary(grouping: unknown, by: \.pid)
         DispatchQueue.global(qos: .utility).async {
-            var yes = Set<CGWindowID>(), no = Set<CGWindowID>()
+            var yes = Set<CGWindowID>(), no = Set<CGWindowID>(), notFound = Set<CGWindowID>()
             var newHandles: [CGWindowID: AXHandle] = [:]
             var titles: [CGWindowID: String] = [:]
             var reasons: [String] = []
@@ -146,6 +157,7 @@ final class WindowCatalog {
                 let missing = left.filter { id in windows.contains { $0.id == id && !$0.isOnScreen } }
                 for id in missing { reasons.append("\(pid)/\(id): not found anywhere") }
                 no.formUnion(missing)
+                notFound.formUnion(missing)
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -153,6 +165,7 @@ final class WindowCatalog {
                     self.handles.merge(newHandles) { _, new in new }
                     self.handles = self.handles.filter { self.real.contains($0.key) }
                     self.notReal.formUnion(no)
+                    for id in notFound { self.unsure[id] = Date() }
                     for (id, t) in titles { self.titleCache[id] = t }
                     self.scanning = false
                     if !reasons.isEmpty { LedgeLog.shared.write("switcher: not windows: \(reasons)") }
@@ -190,7 +203,7 @@ final class WindowCatalog {
             raw.storeBytes(of: Int32(0), toByteOffset: 4, as: Int32.self)
             raw.storeBytes(of: Int32(0x636f_636f), toByteOffset: 8, as: Int32.self)
         }
-        for elementID in UInt64(0)..<UInt64(600) {
+        for elementID in UInt64(0)..<UInt64(1500) {
             token.withUnsafeMutableBytes { $0.storeBytes(of: elementID, toByteOffset: 12, as: UInt64.self) }
             guard let element = create(token as CFData)?.takeRetainedValue() else { continue }
             var role: CFTypeRef?
@@ -244,11 +257,11 @@ final class WindowCatalog {
         var list = Self.rawWindows(onScreenOnly: !allDesktops)
         // The window you're in right now is always first, so a quick tap goes back to the one before:
         // the active app's focused window, or (if that isn't one of these) its front one here.
+        // (Without asking the app: it's already known from when you switched to it, and a busy app
+        // could keep the switcher waiting.)
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
-            let focused = Self.focusedWindow(of: front)
-            if let id = focused, list.contains(where: { $0.id == id }) { use(id) }
-            else if let first = list.first(where: { $0.pid == front }) { use(first.id) }
-            LedgeLog.shared.write("switcher: in \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?") (focused window \(focused.map(String.init) ?? "none"), listed \(focused.map { id in list.contains { $0.id == id } } ?? false))")
+            let known = recent.first { id in list.contains { $0.id == id && $0.pid == front } }
+            if let id = known ?? list.first(where: { $0.pid == front })?.id { use(id) }
         }
         if allDesktops {
             // Off-screen windows that are on some desktop (not leftovers and hidden helpers).

@@ -372,19 +372,50 @@ final class MenuBarHider {
 }
 
 /// A small log file at ~/Library/Logs/Ledge.log, to see what happened after the fact.
-final class LedgeLog {
+final class LedgeLog: @unchecked Sendable {
     static let shared = LedgeLog()
     private let url = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Ledge.log")
+    private let oldURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Ledge.old.log")
+    /// Every write goes through here, one at a time (it's called from several threads).
+    private let queue = DispatchQueue(label: "local.sabir.ledge.log")
     private let formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return f
     }()
+    /// When the log passes this size it's moved to Ledge.old.log and a fresh one starts.
+    private let maxBytes: UInt64 = 1_000_000
+    private var writesSinceCheck = 49 // check the size on the first write after launch
+
+    /// Routine lines (what the island and the switcher are doing, what's playing): only written
+    /// with `defaults write local.sabir.ledge verboseLog -bool true`. Anything that failed or
+    /// went wrong is always written.
+    private static let routine = ["island:", "move:", "media:", "artwork:", "spaces:", "fullscreen:",
+                                  "switcher:", "notes:", "keys:", "calendar:", "reminders:", "timer:", "pomodoro:"]
+    private static let problems = ["fail", "couldn't", "error", "didn't", "refused", "not allowed", "timed out"]
 
     func write(_ message: String) {
-        let line = "\(formatter.string(from: Date())) \(message)\n"
+        let date = Date()
+        if !UserDefaults.standard.bool(forKey: "verboseLog"),
+           Self.routine.contains(where: { message.hasPrefix($0) }),
+           !Self.problems.contains(where: { message.localizedCaseInsensitiveContains($0) }) { return }
+        queue.async { self.append(message, at: date) }
+    }
+
+    private func append(_ message: String, at date: Date) {
+        let line = "\(formatter.string(from: date)) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
+        writesSinceCheck += 1
+        if writesSinceCheck >= 50 {
+            writesSinceCheck = 0
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
+            if size > maxBytes {
+                try? FileManager.default.removeItem(at: oldURL)
+                try? FileManager.default.moveItem(at: url, to: oldURL)
+            }
+        }
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile()
             handle.write(data)
@@ -393,4 +424,7 @@ final class LedgeLog {
             try? data.write(to: url)
         }
     }
+
+    /// Waits for every line so far to be written (before quitting).
+    func flush() { queue.sync {} }
 }

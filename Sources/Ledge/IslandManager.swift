@@ -291,10 +291,38 @@ final class IslandManager {
     var onSwitcherClicked: (() -> Void)?
 
     /// The switcher's keys: open it, move through it, switch, or cancel. Returns true if handled.
+    /// Keys that came in while the switcher was still being opened (a very quick tap and release).
+    private var switcherOpening = false
+    private var switcherEarly: [SwitcherKeys.Action] = []
+
     func switcher(_ action: SwitcherKeys.Action) -> Bool {
+        // The keys arrive inside the system's key tap, which must answer at once: only decide here,
+        // and open the switcher a moment later (gathering windows can wait on slow apps).
+        if action == .open {
+            guard Pref.bool(Pref.switcherOn), !controllers.isEmpty else { return false }
+            switcherOpening = true
+            switcherEarly = []
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                _ = self.openSwitcher()
+                self.switcherOpening = false
+                // A quick tap and release: Tab presses and the switch, in order.
+                let early = self.switcherEarly
+                self.switcherEarly = []
+                for a in early { _ = self.switcher(a) }
+            }
+            return true
+        }
+        if switcherOpening {
+            switcherEarly.append(action)
+            return true
+        }
+        return openSwitcher(action)
+    }
+
+    private func openSwitcher(_ action: SwitcherKeys.Action = .open) -> Bool {
         switch action {
         case .open:
-            guard Pref.bool(Pref.switcherOn) else { return false }
             let p = NSEvent.mouseLocation
             guard let target = controllers.values.first(where: { $0.contains(point: p) && !$0.isSuppressed })
                 ?? controllers.values.first(where: { $0.model.style == .notch }) ?? controllers.values.first else { return false }

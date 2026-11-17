@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Stops here if building or signing fails, so the installed copy is only replaced by a good build.
 scripts/build.sh
 
 echo "• Installing to /Applications"
