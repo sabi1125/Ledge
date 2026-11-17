@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.requestAccessibility = { [weak self] in self?.hider.requestPermission() }
         settingsState.revealIcons = { [weak self] in self?.hider.reveal() }
         settingsState.previewAnimation = { [weak self] in self?.islands.previewAnimation() }
+        settingsState.previewMeeting = { [weak self] in self?.islands.previewMeeting() }
         // Debug hooks (the animation recorder, sample to-dos, test alerts): only in debug builds.
         // Any app can post these notifications, so the installed (release) app doesn't listen.
         #if DEBUG

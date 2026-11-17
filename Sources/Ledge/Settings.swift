@@ -8,6 +8,8 @@ enum Pref {
     static let showVolume = "showVolume"
     static let showBrightness = "showBrightness"
     static let showBattery = "showBattery"
+    /// A countdown beside the notch before a meeting, then a pill with Join.
+    static let meetingAlerts = "meetingAlerts"
     static let openOnHover = "openOnHover"
     static let hideMenuBarIcons = "hideMenuBarIcons"
     static let didFirstLaunch = "didFirstLaunch"
@@ -51,6 +53,7 @@ enum Pref {
             showVolume: true,
             showBrightness: true,
             showBattery: true,
+            meetingAlerts: true,
             openOnHover: true,
             hideMenuBarIcons: true,
             showOnOtherDisplays: true,

@@ -13,6 +13,8 @@ struct CalendarItem: Identifiable, Equatable {
     var joinURL: URL?
     /// The Calendar app's id for the event (to open it there). Nil for sample events.
     var eventID: String? = nil
+    /// You said no to it (no meeting heads-up for it).
+    var declined = false
 
     func isOngoing(at now: Date) -> Bool { start <= now && now < end }
 }
@@ -108,7 +110,8 @@ final class CalendarStore: ObservableObject {
                     start: e.startDate, end: e.endDate, isAllDay: e.isAllDay,
                     color: Color(nsColor: e.calendar?.color ?? .systemBlue),
                     joinURL: MeetingLink.find(in: [e.url?.absoluteString, e.location, e.notes]),
-                    eventID: e.eventIdentifier)
+                    eventID: e.eventIdentifier,
+                    declined: e.attendees?.first(where: \.isCurrentUser)?.participantStatus == .declined)
             }
         if Array(found) != events { events = Array(found) }
         let color = Color(nsColor: quickAddCalendar?.color ?? .systemPurple)

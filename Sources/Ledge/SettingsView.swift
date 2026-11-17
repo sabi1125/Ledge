@@ -12,6 +12,7 @@ final class SettingsState: ObservableObject {
     var revealIcons: (() -> Void)?
     /// Opens and closes the notch island once, to show the chosen animation.
     var previewAnimation: (() -> Void)?
+    var previewMeeting: (() -> Void)?
 }
 
 /// Ledge's settings, shown inside the island itself (opened from Spotlight, the Applications
@@ -60,6 +61,7 @@ struct SettingsPanel: View {
     @AppStorage(Pref.showVolume) private var showVolume = true
     @AppStorage(Pref.showBrightness) private var showBrightness = true
     @AppStorage(Pref.showBattery) private var showBattery = true
+    @AppStorage(Pref.meetingAlerts) private var meetingAlerts = true
     // Behavior
     @AppStorage(Pref.openOnHover) private var openOnHover = true
     @AppStorage(Pref.haptics) private var haptics = true
@@ -176,8 +178,26 @@ struct SettingsPanel: View {
                     SwitchRow(title: "Brightness", symbol: "sun.max.fill", isOn: $showBrightness)
                     CardDivider()
                     SwitchRow(title: "Charging and low battery", symbol: "battery.75percent", isOn: $showBattery)
+                    CardDivider()
+                    SwitchRow(title: "Meeting heads-up", symbol: "video.fill", isOn: $meetingAlerts)
+                    CardDivider()
+                    HStack(spacing: 9) {
+                        Color.clear.frame(width: 16)
+                        Text("A sample meeting, starting in a minute")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondaryText)
+                        Spacer(minLength: 8)
+                        Button("Try it") { state.previewMeeting?() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .frame(height: 22)
+                            .background(Capsule().fill(Color.white.opacity(0.14)))
+                    }
+                    .frame(height: 34)
                 }
-                hint("Shown in the island instead of the macOS pop-ups.")
+                hint("Shown in the island instead of the macOS pop-ups. Meetings: a countdown from 5 minutes before, then Join a minute before.")
             case .animation:
                 animationGrid
                 hint("Tap one to see it right away.")

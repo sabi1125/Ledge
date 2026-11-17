@@ -53,6 +53,11 @@ enum Snapshot {
             ("16-timer-done", .hud, .timerDone(duration: 1500), false, .music),
             ("f7-pill-timer", .compact, nil, false, .music),
             ("f8-pill-timer-music", .compact, nil, true, .music),
+            ("26-meeting-countdown", .compact, nil, true, .music),
+            ("27-meeting-pill", .meeting, nil, true, .music),
+            ("28-meeting-pill-nolink", .meeting, nil, false, .music),
+            ("f10-pill-meeting-countdown", .compact, nil, true, .music),
+            ("f11-pill-meeting", .meeting, nil, true, .music),
             ("10-notes", .expanded, nil, true, .notes),
             ("11-notes-empty", .expanded, nil, true, .notes),
         ]
@@ -107,6 +112,14 @@ enum Snapshot {
             model.timerActive = timerStore.live != nil
             let art = sampleArtwork()
             model.setArtwork(image: art, tint: ArtworkColor.tint(for: art) ?? Theme.defaultTint)
+            if name.contains("meeting") {
+                let link = !name.contains("nolink")
+                model.meeting = .init(id: "m", title: link ? "Design review" : "Lunch with Mina",
+                                      start: now.addingTimeInterval(name.contains("countdown") ? 262 : 42),
+                                      color: link ? Color(red: 0.88, green: 0.35, blue: 0.61) : .green,
+                                      joinURL: link ? URL(string: "https://meet.google.com/abc-defg-hij") : nil,
+                                      eventID: nil, phase: name.contains("countdown") ? .countdown : .alert)
+            }
             model.forceShape(shape, hud: hud, page: page)
 
             let panel = IslandLayout.panelSize(notch: model.notch, style: model.style)

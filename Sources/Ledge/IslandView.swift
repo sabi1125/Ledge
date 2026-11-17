@@ -216,6 +216,12 @@ struct IslandRootView: View {
                     .fixedFrame(for: .hud, model: model)
                     .transition(Self.fade)
             }
+        case .meeting:
+            if let meeting = model.meeting {
+                MeetingPill(model: model, meeting: meeting)
+                    .fixedFrame(for: .meeting, model: model)
+                    .transition(Self.fade)
+            }
         case .expanded, .expandedTall, .expandedNotes:
             let full = IslandLayout.size(for: model.lastOpenShape, notch: model.notch, style: model.style,
                                          tray: model.trayArea)
@@ -271,10 +277,19 @@ struct CompactView: View {
     @ObservedObject var model: IslandModel
     var timer: TimerStore
 
-    /// Music is showing (otherwise this view is here for the timer alone).
-    private var musicShowing: Bool { model.hasMedia && model.media.isPlaying }
+    /// Music is showing (otherwise this view is here for the timer alone). A meeting about to
+    /// start takes the place of both.
+    private var musicShowing: Bool { model.hasMedia && model.media.isPlaying && !model.meetingCountdown }
 
     var body: some View {
+        if let meeting = model.meeting, meeting.phase == .countdown {
+            MeetingCountdown(model: model, meeting: meeting)
+        } else {
+            liveView
+        }
+    }
+
+    @ViewBuilder private var liveView: some View {
         if model.style == .floating {
             // No camera in the way, so the song name fits in the middle.
             let h = model.notch.height
@@ -763,3 +778,123 @@ extension EnvironmentValues {
 }
 
 
+
+
+// MARK: - Meetings
+
+/// A meeting starts in under 5 minutes: its color and a countdown beside the notch, like the
+/// timer (with the title in the middle on the floating pill).
+struct MeetingCountdown: View {
+    @ObservedObject var model: IslandModel
+    var meeting: IslandModel.MeetingNotice
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let time = Text(MeetingSchedule.countdownText(start: meeting.start, now: context.date))
+                .font(.system(size: model.style == .floating ? model.pillFontSize : 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(meeting.color)
+            if model.style == .floating {
+                let h = model.notch.height
+                let m = IslandLayout.floatingCompactMetrics(height: h)
+                HStack(spacing: m.gap) {
+                    MeetingBadge(color: meeting.color, size: m.art)
+                    Text(meeting.title)
+                        .font(.system(size: model.pillFontSize, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    time
+                }
+                .padding(.leading, m.leading)
+                .padding(.trailing, m.trailing)
+                .frame(height: h)
+            } else {
+                HStack(spacing: 0) {
+                    MeetingBadge(color: meeting.color, size: 22)
+                    Spacer(minLength: model.notch.width)
+                    time
+                }
+                .padding(.horizontal, 10)
+                .frame(height: model.notch.height)
+            }
+        }
+    }
+}
+
+/// The meeting's calendar color, as a small video-call mark.
+struct MeetingBadge: View {
+    var color: Color
+    var size: CGFloat
+    var body: some View {
+        Image(systemName: "video.fill")
+            .font(.system(size: size * 0.5, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: size, height: size)
+    }
+}
+
+/// A minute before a meeting: a row under the notch with its title, when, and Join (or Open
+/// for a meeting without a link). The title opens it in Calendar; × dismisses it.
+struct MeetingPill: View {
+    @ObservedObject var model: IslandModel
+    var meeting: IslandModel.MeetingNotice
+
+    private var floating: Bool { model.style == .floating }
+    private var k: CGFloat { floating ? 0.9 : 1 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !floating { Color.clear.frame(height: model.notch.height) } // the camera area
+            row
+                .padding(.leading, floating ? 14 : 18)
+                .padding(.trailing, floating ? 6 : 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: floating ? model.notch.height + 12 : IslandLayout.hudBody)
+        }
+        .foregroundStyle(.white)
+    }
+
+    private var row: some View {
+        HStack(spacing: 8 * k) {
+            Circle().fill(meeting.color).frame(width: 8 * k, height: 8 * k)
+            Button { model.onMeetingOpen?() } label: {
+                Text(meeting.title)
+                    .font(.system(size: 13 * k, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open in Calendar")
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(MeetingSchedule.whenText(start: meeting.start, now: context.date))
+                    .font(.system(size: 12 * k, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(meeting.color)
+            }
+            Button { model.onMeetingJoin?() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: meeting.joinURL == nil ? "calendar" : "video.fill")
+                        .font(.system(size: 10 * k, weight: .semibold))
+                    Text(meeting.joinURL == nil ? "Open" : "Join").font(.system(size: 12 * k, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11 * k)
+                .frame(height: 24 * k)
+                .background(Capsule().fill(meeting.joinURL == nil ? Color.white.opacity(0.16) : Color(red: 0.18, green: 0.49, blue: 0.96)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            Button { model.onMeetingDismiss?() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10 * k, weight: .bold))
+                    .foregroundStyle(Color(white: 0.55))
+                    .frame(width: 22 * k, height: 22 * k)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+    }
+}

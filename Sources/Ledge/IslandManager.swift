@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 import LedgeCore
 
 /// Keeps one island per screen: the notch island on the MacBook's display, and a floating
@@ -49,6 +50,19 @@ final class IslandManager {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.models.forEach { $0.settingsChanged() } }
+            .store(in: &cancellables)
+        // Meetings: a countdown, then a pill with Join (looked at again whenever the calendar changes).
+        calendar.$events
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.checkMeetings() }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.lastMeetingPref != Pref.bool(Pref.meetingAlerts) else { return }
+                self.lastMeetingPref = Pref.bool(Pref.meetingAlerts)
+                self.checkMeetings()
+            }
             .store(in: &cancellables)
         // Keep each pill on its screen's normal desktops only (see FullScreenWatcher).
         fullScreen.onChange = { [weak self] in self?.applyFullScreen() }
@@ -114,6 +128,8 @@ final class IslandManager {
                 controller.start(on: screen)
                 if model.style == .floating { apply(fullScreenRulesTo: controller) }
                 media.sync(model)
+                wireMeetings(model)
+                model.meeting = models.compactMap(\.meeting).first
                 LedgeLog.shared.write("islands: added \(model.style == .notch ? "notch island" : "floating pill") on display \(id)")
             }
         }
@@ -263,6 +279,84 @@ final class IslandManager {
 
     /// The island on the screen you're using (where the pointer is), for indicators.
     /// Alerts you shouldn't miss go to every screen (and show even over full-screen apps).
+    // MARK: Meetings
+
+    /// Meetings you dismissed or joined (no more heads-up for them).
+    private var meetingsDone = Set<String>()
+    private var meetingTimer: Timer?
+    /// The meeting whose pill already played its sound.
+    private var meetingChimed: String?
+    private var lastMeetingPref = Pref.bool(Pref.meetingAlerts)
+
+    /// Looks at the calendar: every second while a meeting is close, otherwise less often.
+    private func checkMeetings() {
+        meetingTimer?.invalidate()
+        let now = Date()
+        let items = calendar.events + (sampleMeeting.map { [$0] } ?? [])
+        let events = items.map {
+            MeetingSchedule.Event(id: $0.id, start: $0.start, end: $0.end, isAllDay: $0.isAllDay, declined: $0.declined)
+        }
+        var notice: IslandModel.MeetingNotice?
+        if Pref.bool(Pref.meetingAlerts) || sampleMeeting != nil,
+           let (id, phase) = MeetingSchedule.current(events, now: now, dismissed: meetingsDone),
+           let item = items.first(where: { $0.id == id }) {
+            notice = .init(id: id, title: item.title, start: item.start, color: item.color,
+                           joinURL: item.joinURL, eventID: item.eventID, phase: phase)
+        }
+        if notice?.phase == .alert, let id = notice?.id, meetingChimed != id {
+            meetingChimed = id
+            LedgeLog.shared.write("meeting: heads-up for an event starting \(MeetingSchedule.whenText(start: notice!.start, now: now))")
+            NSSound(named: "Purr")?.play()
+            Haptics.alert()
+        }
+        for m in models where m.meeting != notice { m.meeting = notice }
+        let wait = MeetingSchedule.nextCheck(events, now: now)
+        meetingTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkMeetings() }
+        }
+    }
+
+    /// "Try it" in settings: a sample meeting a little over a minute away, so the countdown shows
+    /// for a few seconds and then the pill drops down.
+    private var sampleMeeting: CalendarItem?
+
+    func previewMeeting() {
+        for c in controllers.values { c.model.closeSettings() }
+        let start = Date().addingTimeInterval(MeetingSchedule.alertLead + 6)
+        sampleMeeting = CalendarItem(id: "sample-meeting", title: "Sample meeting", start: start,
+                                     end: start.addingTimeInterval(30 * 60), isAllDay: false,
+                                     color: Color(red: 0.88, green: 0.35, blue: 0.61), joinURL: nil)
+        meetingsDone.remove("sample-meeting")
+        meetingChimed = nil
+        // A beat later, once settings has closed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.checkMeetings() }
+    }
+
+    private func finishMeeting(open url: URL?) {
+        guard let notice = models.compactMap(\.meeting).first else { return }
+        meetingsDone.insert(notice.id)
+        if notice.id == sampleMeeting?.id { sampleMeeting = nil }
+        if let url { NSWorkspace.shared.open(url) }
+        checkMeetings()
+    }
+
+    private func wireMeetings(_ model: IslandModel) {
+        model.onMeetingJoin = { [weak self, weak model] in
+            guard let self, let notice = model?.meeting else { return }
+            if let url = notice.joinURL {
+                self.finishMeeting(open: url)
+            } else {
+                if let id = notice.eventID { self.calendar.openInCalendar(id) }
+                self.finishMeeting(open: nil)
+            }
+        }
+        model.onMeetingOpen = { [weak self, weak model] in
+            guard let id = model?.meeting?.eventID else { return }
+            self?.calendar.openInCalendar(id)
+        }
+        model.onMeetingDismiss = { [weak self] in self?.finishMeeting(open: nil) }
+    }
+
     func alertEverywhere(_ hud: HUD) {
         for c in controllers.values { c.alert(hud) }
     }

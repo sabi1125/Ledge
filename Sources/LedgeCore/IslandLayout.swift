@@ -13,6 +13,7 @@ public enum IslandShape: Equatable, Sendable {
     case settings   // Ledge's settings, opened from Spotlight or a right-click
     case switcher   // the window switcher (its size depends on the style and the windows)
     case drop       // a file is being dragged toward the closed island: it grows into a drop target
+    case meeting    // a meeting is about to start: a row under the notch with Join
 
     /// Open (normal or tall).
     public var isOpen: Bool { self == .expanded || self == .expandedTall || self == .expandedNotes }
@@ -55,6 +56,8 @@ public enum IslandLayout {
     /// and a row under the notch for the icon, bar and number.
     public static let hudWing: CGFloat = 36
     public static let hudBody: CGFloat = 38
+    /// The meeting pill: wider than an indicator (title, time, Join), as tall.
+    public static let meetingWing: CGFloat = 112
     /// Height of the open island's content area (below the notch or the top bar).
     public static let expandedBody: CGFloat = 140
     /// The bigger open island, for reading or writing notes: taller and a little wider.
@@ -131,6 +134,8 @@ public enum IslandLayout {
                 return .zero // handled above
             case .drop:
                 return CGSize(width: max(notch.width + 195, dropWidth), height: notch.height + dropBody)
+            case .meeting:
+                return CGSize(width: notch.width + meetingWing * 2, height: notch.height + hudBody + 4)
             }
         case .floating:
             let h = notch.height
@@ -145,6 +150,7 @@ public enum IslandLayout {
             case .settings: return CGSize(width: settingsWidth, height: floatingTopBar + settingsBody)
             case .switcher: return .zero // handled above
             case .drop: return CGSize(width: dropWidth, height: 62)
+            case .meeting: return CGSize(width: 380 + (h - 18) * 3, height: h + 12)
             }
         }
     }
@@ -156,7 +162,7 @@ public enum IslandLayout {
             switch shape {
             case .idle: return 10
             case .hover, .compact: return notch.height * 0.42
-            case .hud: return 24
+            case .hud, .meeting: return 24
             case .expanded, .expandedTall, .expandedNotes, .settings, .switcher: return 30
             case .drop: return 26
             }

@@ -44,6 +44,24 @@ final class IslandModel: ObservableObject {
     @Published var timerActive = false { didSet { if timerActive != oldValue { recompute() } } }
     /// "Timer", "Focus", "Short break"… (sizes the floating pill).
     var timerTitle = "Timer"
+
+    /// A meeting about to start: counting down beside the notch, then a pill with Join.
+    struct MeetingNotice: Equatable {
+        var id: String
+        var title: String
+        var start: Date
+        var color: Color
+        var joinURL: URL?
+        var eventID: String?
+        var phase: MeetingSchedule.Phase
+    }
+    @Published var meeting: MeetingNotice? { didSet { if meeting?.phase != oldValue?.phase || meeting?.id != oldValue?.id { recompute() } } }
+    /// The meeting's buttons (handled by `IslandManager`, which knows the calendar).
+    var onMeetingJoin: (() -> Void)?
+    var onMeetingOpen: (() -> Void)?
+    var onMeetingDismiss: (() -> Void)?
+    var meetingCountdown: Bool { meeting?.phase == .countdown }
+    var meetingAlert: Bool { meeting?.phase == .alert }
     /// Called when the island opens, for the trackpad tick.
     var onOpen: (() -> Void)?
 
@@ -655,16 +673,16 @@ final class IslandModel: ObservableObject {
     /// Width of the floating music pill, sized to fit the song name (nil on the notch).
     var compactWidth: CGFloat? {
         // On the notch, the countdown needs slightly wider wings than the music bars.
-        guard style == .floating else { return timerActive ? notch.width + 2 * 52 : nil }
-        let musicShowing = hasMedia && media.isPlaying
-        let title = musicShowing ? (media.title ?? "") : timerTitle
+        guard style == .floating else { return timerActive || meetingCountdown ? notch.width + 2 * 52 : nil }
+        let musicShowing = hasMedia && media.isPlaying && !meetingCountdown
+        let title = meetingCountdown ? (meeting?.title ?? "") : musicShowing ? (media.title ?? "") : timerTitle
         let artist = musicShowing ? (media.artist ?? "") : ""
         let bold = NSFont.systemFont(ofSize: pillFontSize, weight: .semibold)
         let plain = NSFont.systemFont(ofSize: pillFontSize, weight: .regular)
         var width = (title as NSString).size(withAttributes: [.font: bold]).width
         if !artist.isEmpty { width += ("  " + artist as NSString).size(withAttributes: [.font: plain]).width }
         // The countdown takes the place of the bars and is a bit wider.
-        if timerActive { width += Self.countdownWidth(fontSize: pillFontSize) - 16 }
+        if timerActive || meetingCountdown { width += Self.countdownWidth(fontSize: pillFontSize) - 16 }
         return IslandLayout.floatingCompactWidth(textWidth: width.rounded(.up) + 2, height: notch.height)
     }
 
@@ -678,6 +696,8 @@ final class IslandModel: ObservableObject {
         // While the note is enlarged (or on its way back), or the switcher shows, hovering the
         // notch doesn't open the island.
         guard !isNoteEnlarged, !isReturningNote, switcher == nil else { return }
+        // Over the meeting pill, hovering leaves it alone (so you can reach Join); a click opens.
+        guard force || !meetingAlert else { return }
         guard force || isHovering || !Pref.bool(Pref.openOnHover) else { return }
         guard !isExpanded, !pages.isEmpty else { return }
         // Always open where you left off: the same page, and quick add or the to-do you had open.
@@ -721,7 +741,9 @@ final class IslandModel: ObservableObject {
             next = .drop
         } else if hud != nil {
             next = .hud
-        } else if (hasMedia && media.isPlaying) || timerActive {
+        } else if meetingAlert {
+            next = .meeting
+        } else if (hasMedia && media.isPlaying) || timerActive || meetingCountdown {
             next = .compact
         } else if isHovering && !Pref.bool(Pref.openOnHover) {
             // Click-to-open mode: a small bump shows the island noticed you.
