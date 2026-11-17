@@ -70,11 +70,30 @@ final class IslandManager {
     func sync() {
         let showOthers = Pref.bool(Pref.showOnOtherDisplays)
         lastShowOthers = showOthers
-        var present = Set<CGDirectDisplayID>()
-        for screen in NSScreen.screens {
+        // Lid closed (only external displays): with no notch to sit in, the main display gets the
+        // pill even when "Show Ledge on other displays" is off, so there's always an island.
+        let screens = NSScreen.screens
+        let noNotch = !screens.contains(where: IslandController.hasNotch)
+        let fallback = noNotch && !showOthers ? (NSScreen.main ?? screens.first) : nil
+        var wanted: [(CGDirectDisplayID, NSScreen)] = []
+        for screen in screens {
             guard let id = IslandController.displayID(of: screen) else { continue }
-            guard IslandController.hasNotch(screen) || showOthers else { continue }
-            present.insert(id)
+            guard IslandController.hasNotch(screen) || showOthers || screen === fallback else { continue }
+            wanted.append((id, screen))
+        }
+        let present = Set(wanted.map(\.0))
+        // Islands of screens that are gone go first, so they let go of their shortcuts before
+        // a new island takes them.
+        for (id, controller) in controllers where !present.contains(id) {
+            if controller === switcherIsland {
+                switcherIsland = nil
+                onSwitcherClicked?() // the keys go back to normal
+            }
+            controller.stop()
+            controllers[id] = nil
+            LedgeLog.shared.write("islands: removed island from display \(id)")
+        }
+        for (id, screen) in wanted {
             if let existing = controllers[id] {
                 existing.layout(on: screen)
             } else {
@@ -97,11 +116,6 @@ final class IslandManager {
                 media.sync(model)
                 LedgeLog.shared.write("islands: added \(model.style == .notch ? "notch island" : "floating pill") on display \(id)")
             }
-        }
-        for (id, controller) in controllers where !present.contains(id) {
-            controller.stop()
-            controllers[id] = nil
-            LedgeLog.shared.write("islands: removed island from display \(id)")
         }
         fullScreen.isNeeded = controllers.values.contains { $0.model.style == .floating }
     }

@@ -4,6 +4,8 @@ import Foundation
 /// A system-wide keyboard shortcut (works without any permission).
 final class HotKey {
     private static var actions: [UInt32: () -> Void] = [:]
+    /// Which HotKey each id's action belongs to (an old one going away mustn't clear a new one's).
+    private static var owners: [UInt32: ObjectIdentifier] = [:]
     private static var handlerInstalled = false
 
     private var ref: EventHotKeyRef?
@@ -13,6 +15,7 @@ final class HotKey {
         self.id = id
         Self.installHandlerIfNeeded()
         Self.actions[id] = action
+        Self.owners[id] = ObjectIdentifier(self)
         let hotKeyID = EventHotKeyID(signature: OSType(0x4C44_4745), id: id) // "LDGE"
         let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
         // Fails when another app already uses the same shortcut.
@@ -27,7 +30,10 @@ final class HotKey {
 
     deinit {
         if let ref { UnregisterEventHotKey(ref) }
-        Self.actions[id] = nil
+        if Self.owners[id] == ObjectIdentifier(self) {
+            Self.actions[id] = nil
+            Self.owners[id] = nil
+        }
     }
 
     private static func installHandlerIfNeeded() {

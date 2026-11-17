@@ -537,6 +537,16 @@ final class IslandController {
         for m in monitors { NSEvent.removeMonitor(m) }
         monitors = []
         cancellables = []
+        // Let go of ⌘N, ⌘1–⌘4, Esc… now, not whenever this island is freed: a screen unplugged
+        // while its island was open mustn't keep those keys from every app.
+        shortcutRetry?.cancel()
+        shortcutRetry = nil
+        shortcuts = [:]
+        model.endSwitcher()
+        notePanel?.orderOut(nil)
+        notePanel?.contentView = nil
+        notePanel?.close()
+        notePanel = nil
         panel?.orderOut(nil)
         panel?.close()
         panel = nil

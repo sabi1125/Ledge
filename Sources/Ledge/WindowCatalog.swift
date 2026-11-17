@@ -387,8 +387,17 @@ final class WindowCatalog {
             }
             LedgeLog.shared.write("switcher: to another \(window.appName) window on another desktop (window server \(forward), raised \(raised))")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                let visible = Self.rawWindows(onScreenOnly: true).contains { $0.id == window.id }
-                LedgeLog.shared.write("switcher: \(window.appName)'s window \(visible ? "is on screen now" : "still isn't on screen")")
+                guard !Self.rawWindows(onScreenOnly: true).contains(where: { $0.id == window.id }) else { return }
+                // Didn't move: try the Dock's way too (activate with all windows), then raise it again.
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.yieldActivation(to: app)
+                app.activate(options: [.activateAllWindows])
+                Self.bringForward(pid: window.pid, window: window.id)
+                if let element { AXUIElementPerformAction(element, kAXRaiseAction as CFString) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let visible = Self.rawWindows(onScreenOnly: true).contains { $0.id == window.id }
+                    LedgeLog.shared.write("switcher: \(window.appName)'s window \(visible ? "is on screen after a second try" : "still isn't on screen after a second try")")
+                }
             }
             return
         }
