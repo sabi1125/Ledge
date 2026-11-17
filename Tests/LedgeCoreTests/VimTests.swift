@@ -175,6 +175,9 @@ final class VimTests: XCTestCase {
         XCTAssertEqual(type("a|bc", "AX<Esc>"), "abc|X")
         XCTAssertEqual(type("o|ne\ntwo", "oX<Esc>"), "one\n|X\ntwo")
         XCTAssertEqual(type("one\nt|wo", "OX<Esc>"), "one\n|X\ntwo")
+        // O on a list line opens an item of it above, at the same indent.
+        XCTAssertEqual(type("- [x] d|one", "OX<Esc>"), "- [ ] |X\n- [x] done")
+        XCTAssertEqual(type("    - b|ullet", "OX<Esc>"), "    - |X\n    - bullet")
         XCTAssertEqual(type("a|bc", "i<Esc>"), "|abc")
     }
 

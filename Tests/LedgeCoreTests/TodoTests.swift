@@ -88,6 +88,10 @@ final class TodoTests: XCTestCase {
         XCTAssertEqual(Checklist.autoFormat(old: "- [ ] one", new: "- [ ] one\n"), "- [ ] one\n- [ ] ")
         XCTAssertEqual(Checklist.autoFormat(old: "- [x] done", new: "- [x] done\n"), "- [x] done\n- [ ] ")
         XCTAssertEqual(Checklist.autoFormat(old: "- [ ] one\n- [ ] ", new: "- [ ] one\n- [ ] \n"), "- [ ] one\n")
+        // Return on an empty nested item moves it out one level instead of ending the list.
+        XCTAssertEqual(Checklist.autoFormat(old: "- [ ] a\n    - [ ] ", new: "- [ ] a\n    - [ ] \n"), "- [ ] a\n- [ ] ")
+        XCTAssertEqual(Checklist.autoFormat(old: "- a\n        - ", new: "- a\n        - \n"), "- a\n    - ")
+        XCTAssertEqual(Checklist.autoFormat(old: "- a\n\t- ", new: "- a\n\t- \n"), "- a\n- ")
         XCTAssertEqual(Checklist.autoFormat(old: "- bullet", new: "- bullet\n"), "- bullet\n- ")
         XCTAssertNil(Checklist.autoFormat(old: "plain", new: "plain\n"))
     }

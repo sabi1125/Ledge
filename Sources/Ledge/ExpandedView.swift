@@ -7,9 +7,11 @@ import SwiftUI
 struct ExpandedView: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var calendar: CalendarStore
-    @ObservedObject var notes: NotesStore
-    @ObservedObject var timer: TimerStore
-    @ObservedObject var awake: AwakeStore
+    // Only handed on to the pages, which watch them themselves: watching them here too rebuilt
+    // the whole island on every key typed in a note (and every second of a running timer).
+    let notes: NotesStore
+    let timer: TimerStore
+    let awake: AwakeStore
     @ObservedObject var todos: RemindersStore = .shared
     @State private var showAwakeMenu = ExpandedView.snapshotMenu
     /// For the snapshot tool only.

@@ -325,6 +325,11 @@ final class IslandController {
         guard flags.isDisjoint(with: [.command, .control, .option]),
               let window = e.window as? IslandPanel, window.isKeyWindow,
               let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor else { return false }
+        return indent(editor, out: flags.contains(.shift))
+    }
+
+    /// Indents (or with `out`, outdents) the cursor's line in a notes box. Always takes the key.
+    static func indent(_ editor: NSTextView, out: Bool) -> Bool {
         let text = editor.string as NSString
         let selection = editor.selectedRange()
         let lineRange = text.lineRange(for: NSRange(location: selection.location, length: 0))
@@ -334,7 +339,7 @@ final class IslandController {
             editor.replaceCharacters(in: range, with: string)
             editor.didChangeText()
         }
-        if flags.contains(.shift) {
+        if out {
             let spaces = line.prefix(4).prefix { $0 == " " }.count
             let remove = spaces > 0 ? spaces : (line.hasPrefix("\t") ? 1 : 0)
             guard remove > 0 else { return true }
@@ -414,6 +419,11 @@ final class IslandController {
               let editor = window.firstResponder as? NSTextView, !editor.isFieldEditor,
               !editor.hasMarkedText()
         else { return false }
+        return removeMarker(editor)
+    }
+
+    /// Backspace right where an item's text starts: its whole marker goes. False if it isn't there.
+    static func removeMarker(_ editor: NSTextView) -> Bool {
         let selection = editor.selectedRange()
         guard selection.length == 0,
               let marker = MarkdownStyle.markerToRemove(backspaceAt: selection.location, in: editor.string)

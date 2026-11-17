@@ -165,8 +165,21 @@ public enum Checklist {
     /// are several in a row: "> a" + return, with a line below, looks the same as a return typed
     /// on an empty line under it.
     public static func autoFormat(old: String, new: String, cursor: Int? = nil) -> String? {
+        let newNS = new as NSString
+        // One character typed (the usual keystroke): only its line can need anything, and only a
+        // space (finishing "[] ") or a return can. Checked first, so a long note isn't gone
+        // through on every key.
+        if let cursor, newNS.length == (old as NSString).length + 1, cursor >= 1, cursor <= newNS.length {
+            let typed = newNS.character(at: cursor - 1)
+            if typed == 0x20 {
+                let line = newNS.lineRange(for: NSRange(location: cursor - 1, length: 0))
+                guard shortcut.firstMatch(in: new, range: line) != nil else { return nil }
+            } else if typed != 0x0A {
+                return nil
+            }
+        }
         // "[] " or "[ ] " typed at the start of a line.
-        let range = NSRange(location: 0, length: (new as NSString).length)
+        let range = NSRange(location: 0, length: newNS.length)
         if shortcut.firstMatch(in: new, range: range) != nil {
             return shortcut.stringByReplacingMatches(in: new, range: range, withTemplate: "$1- [ ] ")
         }
@@ -196,8 +209,14 @@ public enum Checklist {
                 // Return right before an item's text: the item moves down, an empty one stays above.
                 return String(before[..<lineStart]) + indent + emptyMarker + "\n" + indent + marker + after
             }
+            // Return on an empty nested item: it moves out one level (like Notion or Apple Notes).
+            if !indent.isEmpty {
+                let outer = indent.hasSuffix("\t") ? String(indent.dropLast())
+                    : String(indent.dropLast(min(4, indent.reversed().prefix { $0 == " " }.count)))
+                return String(before[..<lineStart]) + outer + emptyMarker + after
+            }
             // Return on an empty item: end the list (drop the empty marker, no new line).
-            return String(before[..<lineStart]) + indent + after
+            return String(before[..<lineStart]) + after
         }
         return before + "\n" + indent + nextMarker(after: marker, isCheckbox: isCheckbox) + after
     }
@@ -208,6 +227,16 @@ public enum Checklist {
         let digits = marker.prefix { $0.isNumber }
         guard let number = Int(digits) else { return marker }
         return String(number + 1) + marker.dropFirst(digits.count)
+    }
+
+    /// What a new item next to this line starts with ("    - [ ] " for a nested checkbox, "- ",
+    /// "1. ", "> "), or nil if it isn't a list or quote line. For Vim's O, a new line above.
+    public static func itemStart(for line: String) -> String? {
+        let ns = line as NSString
+        guard let m = continuing.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        let marker = ns.substring(with: m.range(at: 2))
+        let isCheckbox = marker.hasPrefix("- [") || marker.hasPrefix("* [")
+        return ns.substring(with: m.range(at: 1)) + (isCheckbox ? "- [ ] " : marker)
     }
 
     /// A list line ("- item", "* item", "- [ ] step"), which Tab indents as a whole.

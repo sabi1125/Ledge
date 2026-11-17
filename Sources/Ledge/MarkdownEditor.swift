@@ -128,7 +128,7 @@ enum NotesMarkdown {
     /// Styles the whole text and returns what the text view draws on top. Marks on the lines
     /// the selection touches are shown; with no selection (the box isn't being typed in) all hide.
     @discardableResult
-    static func style(_ text: NSMutableAttributedString, selection: NSRange?, preview: Bool = false) -> Decorations {
+    static func style(_ text: NSMutableAttributedString, selection: NSRange?) -> Decorations {
         let ns = text.string as NSString
         text.setAttributes(baseAttributes, range: NSRange(location: 0, length: ns.length))
         let spans = MarkdownStyle.spans(in: text.string)
@@ -175,8 +175,9 @@ enum NotesMarkdown {
             switch span.kind {
             case .code:
                 text.addAttribute(.foregroundColor, value: codeColor, range: range)
-                if preview { text.addAttribute(.backgroundColor, value: inlineCodeBoxColor, range: range) }
-                drawn.inlineCode.append(range)
+                // On the cursor's line the backticks show, inside the box with the code.
+                let withMarks = NSRange(location: range.location - 1, length: range.length + 2)
+                drawn.inlineCode.append(isShown(range) && withMarks.location >= 0 && withMarks.upperBound <= ns.length ? withMarks : range)
             case .codeBlock:
                 text.addAttribute(.foregroundColor, value: codeBlockColor, range: range)
             case .codeArea:
@@ -216,6 +217,9 @@ enum NotesMarkdown {
                 drawn.rules.append(range)
             case .lead:
                 drawn.leads.append(range)
+            case .mark where isShown(range) && ns.substring(with: range) == "`":
+                // A shown backtick of `code`: in the code's font, a quieter shade of its color.
+                text.addAttributes([.font: codeFont, .foregroundColor: codeColor.withAlphaComponent(0.45)], range: range)
             case .mark, .fence:
                 if isShown(range) {
                     text.addAttribute(.foregroundColor, value: span.kind == .fence ? codeMarkColor : markColor, range: range)
@@ -235,8 +239,17 @@ enum NotesMarkdown {
             text.addAttribute(.paragraphStyle, value: fenceParagraph, range: ns.lineRange(for: span.range))
         }
         for span in spans where span.kind == .hang {
-            let width = text.attributedSubstring(from: span.range).size().width
-            text.addAttribute(.paragraphStyle, value: paragraph { $0.headIndent = width }, range: ns.lineRange(for: span.range))
+            let marker = text.attributedSubstring(from: span.range)
+            let style: NSParagraphStyle
+            if let kept = hangStyles[marker] {
+                style = kept
+            } else {
+                let width = marker.size().width
+                style = paragraph { $0.headIndent = width }
+                if hangStyles.count > 500 { hangStyles.removeAll() }
+                hangStyles[marker] = style
+            }
+            text.addAttribute(.paragraphStyle, value: style, range: ns.lineRange(for: span.range))
         }
         return drawn
     }
@@ -245,9 +258,17 @@ enum NotesMarkdown {
     private static func addTrait(_ trait: NSFontTraitMask, to text: NSMutableAttributedString, in range: NSRange) {
         text.enumerateAttribute(.font, in: range) { value, part, _ in
             guard let font = value as? NSFont else { return }
-            text.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: trait), range: part)
+            let key = TraitKey(font: font, trait: trait.rawValue)
+            let converted = traitFonts[key] ?? NSFontManager.shared.convert(font, toHaveTrait: trait)
+            traitFonts[key] = converted
+            text.addAttribute(.font, value: converted, range: part)
         }
     }
+
+    /// The same few markers and fonts come up on every key: measured and converted once.
+    private static var hangStyles: [NSAttributedString: NSParagraphStyle] = [:]
+    private struct TraitKey: Hashable { let font: NSFont; let trait: UInt }
+    private static var traitFonts: [TraitKey: NSFont] = [:]
 
     // MARK: Drawing helpers (shared with the text view)
 
@@ -298,87 +319,6 @@ enum NotesMarkdown {
             box.stroke()
         }
     }
-
-    // MARK: The preview (while the island moves)
-
-    /// One line of the note for `MarkdownPreview`.
-    enum PreviewLine {
-        /// Styled text; `quote` gets a bar, `code` sits in the code box.
-        case text(AttributedString, quote: Bool, code: Bool)
-        /// A "---" line.
-        case rule
-    }
-
-    /// The note as SwiftUI lines, styled the same way, for while the island is still moving
-    /// (see `IslandModel.isSettled`). Bullets and boxes become characters here.
-    static func previewLines(_ text: String) -> [PreviewLine] {
-        let styled = NSMutableAttributedString(string: text)
-        let drawn = style(styled, selection: nil, preview: true)
-        let ns = text as NSString
-
-        // What each line is, read before any characters change.
-        var flags: [(rule: Bool, quote: Bool, code: Bool)] = []
-        forEachLine(ns) { range in
-            flags.append((
-                rule: drawn.rules.contains { $0.location == range.location },
-                quote: drawn.quoteBars.contains { $0.location >= range.location && $0.location <= range.upperBound },
-                code: drawn.codeBoxes.contains { range.location >= $0.location && range.location <= $0.upperBound }
-            ))
-        }
-
-        // Bullets and boxes as characters, from the end so the earlier ranges stay right.
-        var swaps: [(NSRange, String, NSColor)] = drawn.bullets.map { ($0.range, ["●", "○", "◆", "◇"][$0.level % 4], bulletColor) }
-        swaps += drawn.checkboxes.map { ($0.range, $0.done ? "☑" : "☐", $0.done ? checkedColor : checkboxColor) }
-        for (range, symbol, color) in swaps.sorted(by: { $0.0.location > $1.0.location }) {
-            let font = NSFont.systemFont(ofSize: symbol == "●" || symbol == "○" ? 8 : 12)
-            styled.replaceCharacters(in: range, with: NSAttributedString(string: symbol, attributes: [.font: font, .foregroundColor: color]))
-        }
-
-        var lines: [PreviewLine] = []
-        var index = 0
-        forEachLine(styled.string as NSString) { range in
-            let flag = index < flags.count ? flags[index] : (rule: false, quote: false, code: false)
-            index += 1
-            if flag.rule {
-                lines.append(.rule)
-            } else {
-                lines.append(.text(swiftUIText(styled.attributedSubstring(from: range)), quote: flag.quote, code: flag.code))
-            }
-        }
-        return lines
-    }
-
-    /// Calls `body` with each line's range (without the "\n").
-    private static func forEachLine(_ ns: NSString, _ body: (NSRange) -> Void) {
-        var start = 0
-        while true {
-            let newline = ns.range(of: "\n", options: [], range: NSRange(location: start, length: ns.length - start))
-            let end = newline.location == NSNotFound ? ns.length : newline.location
-            body(NSRange(location: start, length: end - start))
-            if newline.location == NSNotFound { return }
-            start = end + 1
-        }
-    }
-
-    /// AppKit attributes (NSFont, NSColor) turned into ones SwiftUI's Text draws.
-    private static func swiftUIText(_ line: NSAttributedString) -> AttributedString {
-        guard line.length > 0 else {
-            var blank = AttributedString(" ")
-            blank.font = Font(baseFont as CTFont)
-            return blank
-        }
-        var out = AttributedString()
-        line.enumerateAttributes(in: NSRange(location: 0, length: line.length)) { attributes, range, _ in
-            var piece = AttributedString(line.attributedSubstring(from: range).string)
-            if let font = attributes[.font] as? NSFont { piece.font = Font(font as CTFont) }
-            if let color = attributes[.foregroundColor] as? NSColor { piece.foregroundColor = Color(nsColor: color) }
-            if let color = attributes[.backgroundColor] as? NSColor { piece.backgroundColor = Color(nsColor: color) }
-            if attributes[.strikethroughStyle] != nil { piece.strikethroughStyle = .single }
-            if attributes[.underlineStyle] != nil { piece.underlineStyle = .single }
-            out += piece
-        }
-        return out
-    }
 }
 
 // MARK: - The text box
@@ -399,6 +339,25 @@ struct MarkdownEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView(frame: .zero)
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.appearance = NSAppearance(named: .darkAqua)
+
+        let view = Self.makeTextView(text: text, width: scroll.contentSize.width)
+        view.delegate = context.coordinator
+        view.onFocusChange = onFocusChange
+        view.vimEnabled = vimMotions
+        view.restyle()
+        view.wantsFocus = wantsFocus
+        scroll.documentView = view
+        return scroll
+    }
+
+    /// The text view itself, set up for notes. Shared with `MarkdownPreview`, so the picture shown
+    /// while the island moves is drawn by exactly the same thing.
+    static func makeTextView(text: String, width: CGFloat) -> MarkdownTextView {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         storage.addLayoutManager(layout)
@@ -407,13 +366,7 @@ struct MarkdownEditor: NSViewRepresentable {
         container.lineFragmentPadding = 0
         layout.addTextContainer(container)
 
-        let scroll = NSScrollView(frame: .zero)
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = false
-        scroll.hasHorizontalScroller = false
-        scroll.appearance = NSAppearance(named: .darkAqua)
-
-        let view = MarkdownTextView(frame: NSRect(origin: .zero, size: scroll.contentSize), textContainer: container)
+        let view = MarkdownTextView(frame: NSRect(x: 0, y: 0, width: width, height: 0), textContainer: container)
         view.autoresizingMask = [.width]
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
@@ -432,13 +385,7 @@ struct MarkdownEditor: NSViewRepresentable {
         view.typingAttributes = NotesMarkdown.baseAttributes
         view.string = text
         view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-        view.delegate = context.coordinator
-        view.onFocusChange = onFocusChange
-        view.vimEnabled = vimMotions
-        view.restyle()
-        view.wantsFocus = wantsFocus
-        scroll.documentView = view
-        return scroll
+        return view
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -494,13 +441,14 @@ struct MarkdownEditor: NSViewRepresentable {
             // While a drag is still selecting, hold the marks still (the text would shift under the
             // pointer); the text view restyles when the button comes up.
             guard NSEvent.pressedMouseButtons == 0 else { return }
-            view.restyle()
+            view.selectionMoved()
         }
 
         /// Keeps the cursor off the hidden "- [ ] " and "> " in front of a line's text.
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                       toCharacterRange new: NSRange) -> NSRange {
-            guard !isApplying, new.length == 0, let view = textView as? MarkdownTextView else { return new }
+            guard !isApplying, new.length == 0, let view = textView as? MarkdownTextView,
+                  !view.isMidEdit else { return new }
             return NSRange(location: view.allowedCursor(new.location, from: old), length: 0)
         }
 
@@ -511,7 +459,9 @@ struct MarkdownEditor: NSViewRepresentable {
             isApplying = true
             defer { isApplying = false }
             guard view.hasFocus else {
-                view.string = text
+                // Only the part that differs is replaced (a copy of the note in a window you're not
+                // typing in follows every key; replacing all of it made it lay out the whole note).
+                view.replaceDifference(with: text)
                 undo.removeAllActions()
                 view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
                 view.restyle()
@@ -573,9 +523,32 @@ final class MarkdownTextView: NSTextView {
     /// composing, so its underline isn't wiped; it runs again when the text is committed.
     func restyle() {
         guard !hasMarkedText(), let storage = textStorage else { return }
+        // Styled on a copy, then only the parts that look different change in the box: changing
+        // a part makes macOS lay it out again, and laying out the whole note on every key was
+        // most of the time a keystroke took.
+        let selection = hasFocus ? selectedRange() : nil
+        let copy = NSMutableAttributedString(string: storage.string)
+        drawn = NotesMarkdown.style(copy, selection: selection)
+        let whole = NSRange(location: 0, length: copy.length)
+        // The box evens out paragraph styles (one per paragraph); the copy must match it.
+        copy.fixParagraphStyleAttribute(in: whole)
         storage.beginEditing()
-        drawn = NotesMarkdown.style(storage, selection: hasFocus ? selectedRange() : nil)
+        // Line by line (compared as a whole, which is quick): only lines that differ are touched.
+        let lines = copy.string as NSString
+        var at = 0
+        while at < whole.length {
+            let line = lines.lineRange(for: NSRange(location: at, length: 0))
+            if !copy.attributedSubstring(from: line).isEqual(to: storage.attributedSubstring(from: line)) {
+                copy.enumerateAttributes(in: line, options: []) { attributes, range, _ in
+                    storage.setAttributes(attributes, range: range)
+                }
+            }
+            at = line.upperBound
+        }
         storage.endEditing()
+        styledLines = selection.map { (string as NSString).lineRange(for: $0) }
+        styledChanges = textChanges
+        styledLength = storage.length
         // New text starts plain; the next restyle gives it its look. Inside a code card it's dark
         // code text, and the cursor turns dark too, so both show on the white.
         let cursor = selectedRange().location
@@ -585,6 +558,53 @@ final class MarkdownTextView: NSTextView {
         blockLit = true
         updateCursor()
         needsDisplay = true
+    }
+
+    /// What the last restyle was for: the lines whose marks show, and the text (by change count).
+    private var styledLines: NSRange?
+    private var styledChanges = -1
+    private var textChanges = 0
+    private var styledLength = -1
+
+    /// Makes the text `text` by replacing only what's different (no undo, no "text changed").
+    func replaceDifference(with text: String) {
+        guard let storage = textStorage else { string = text; return }
+        let old = storage.string as NSString, new = text as NSString
+        let shortest = min(old.length, new.length)
+        var prefix = 0
+        while prefix < shortest && old.character(at: prefix) == new.character(at: prefix) { prefix += 1 }
+        var suffix = 0
+        while suffix < shortest - prefix
+                && old.character(at: old.length - 1 - suffix) == new.character(at: new.length - 1 - suffix) { suffix += 1 }
+        let removed = NSRange(location: prefix, length: old.length - suffix - prefix)
+        let inserted = new.substring(with: NSRange(location: prefix, length: new.length - suffix - prefix))
+        storage.beginEditing()
+        storage.replaceCharacters(in: removed, with: inserted)
+        storage.endEditing()
+    }
+
+    override func didChangeText() {
+        textChanges += 1
+        super.didChangeText()
+    }
+
+    /// The text changed and hasn't been styled again yet: where the markers were is out of date.
+    var isMidEdit: Bool { (textStorage?.length ?? 0) != styledLength || styledChanges != textChanges }
+
+    /// The cursor moved. Marks show only on the cursor's lines, so the note is styled again only
+    /// when those lines change; typing restyles anyway, once the change is in.
+    func selectionMoved() {
+        // Mid-edit (the text is longer or shorter than when it was styled): the edit's own
+        // restyle comes in a moment, so only the cursor moves now.
+        let editing = (textStorage?.length ?? 0) != styledLength && styledChanges == textChanges
+        let lines = hasFocus ? (string as NSString).lineRange(for: selectedRange()) : nil
+        if !editing, lines != styledLines || styledChanges != textChanges { restyle(); return }
+        let cursor = selectedRange().location
+        let inCode = drawn.codeBoxes.contains { cursor >= $0.location && cursor <= $0.upperBound }
+        typingAttributes = inCode ? NotesMarkdown.codeTypingAttributes : NotesMarkdown.baseAttributes
+        lastActivity = Date()
+        blockLit = true
+        updateCursor()
     }
 
     /// Where the cursor may go: never inside the hidden marker in front of a list item or quote.
@@ -642,12 +662,14 @@ final class MarkdownTextView: NSTextView {
         NotesMarkdown.inlineCodeBoxColor.setFill()
         for range in drawn.inlineCode {
             guard let found = glyphs(range) else { continue }
+            // With its backticks showing, they're the box's padding; otherwise it reaches past the code a little.
+            let pad: CGFloat = text.character(at: range.location) == 0x60 ? 0 : 3
             layoutManager.enumerateEnclosingRects(forGlyphRange: found, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
                                                   in: textContainer) { rect, _ in
                 let height = NotesMarkdown.lineHeight + 1
                 let line = rect.offsetBy(dx: origin.x, dy: origin.y)
-                let box = NSRect(x: line.minX - 3, y: line.minY + (line.height - spacing - height) / 2,
-                                 width: line.width + 6, height: height)
+                let box = NSRect(x: line.minX - pad, y: line.minY + (line.height - spacing - height) / 2,
+                                 width: line.width + pad * 2, height: height)
                 NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4).fill()
             }
         }
@@ -712,6 +734,9 @@ final class MarkdownTextView: NSTextView {
 
     /// Normal or visual mode: keys are commands.
     private var vimCommands: Bool { vimEnabled && vim.mode != .insert }
+    #if DEBUG
+    var vimMode: String { "\(vim.mode)" }
+    #endif
 
     /// With Vim on, the cursor is a solid block in every mode (not while an input method is
     /// composing: then it's the usual thin cursor, inside the underlined text).
@@ -1012,38 +1037,56 @@ final class MarkdownTextView: NSTextView {
     }
 }
 
-/// The note drawn as plain SwiftUI while the island is still moving: the same look.
+/// The note while the island is still moving: a picture of the real text box (drawn off screen
+/// at the same width), so it looks exactly like the box that replaces it once the island settles.
+/// A live text box isn't used while moving, since it would reflow with every step of the resize.
 struct MarkdownPreview: View {
     var text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NotesMarkdown.lineSpacing) {
-            ForEach(Array(NotesMarkdown.previewLines(text).enumerated()), id: \.offset) { _, line in
-                switch line {
-                case .text(let styled, let quote, let code):
-                    Text(styled)
-                        .lineSpacing(NotesMarkdown.lineSpacing)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, code ? NotesMarkdown.codeInset : 0)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(code ? Color(nsColor: NotesMarkdown.codeBoxColor) : .clear)
-                        .overlay(alignment: .leading) {
-                            if quote {
-                                RoundedRectangle(cornerRadius: 1.5)
-                                    .fill(Color(nsColor: NotesMarkdown.quoteBarColor))
-                                    .frame(width: 3)
-                            }
-                        }
-                case .rule:
-                    Rectangle()
-                        .fill(Color(nsColor: NotesMarkdown.ruleColor))
-                        .frame(height: 1)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: NotesMarkdown.lineHeight)
-                }
+        GeometryReader { geometry in
+            if let image = MarkdownPicture.image(of: text, size: geometry.size) {
+                Image(nsImage: image)
+                    .frame(width: image.size.width, height: image.size.height)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
+    }
+}
+
+/// Pictures of notes for `MarkdownPreview`, kept for the last few texts and sizes (the island's
+/// animation asks for the same one on every frame).
+@MainActor
+enum MarkdownPicture {
+    private static var kept: [(key: String, image: NSImage)] = []
+
+    static func image(of text: String, size: CGSize) -> NSImage? {
+        let width = size.width.rounded(.down), height = size.height.rounded(.up)
+        guard width > 0, height > 0, !text.isEmpty else { return nil }
+        let key = "\(width)x\(height)\n\(text)"
+        if let found = kept.first(where: { $0.key == key }) { return found.image }
+
+        let view = MarkdownEditor.makeTextView(text: text, width: width)
+        view.appearance = NSAppearance(named: .darkAqua)
+        view.restyle()
+        if let layout = view.layoutManager, let container = view.textContainer {
+            layout.ensureLayout(for: container)
+            view.frame.size.height = layout.usedRect(for: container).height
+        }
+        // Only what fits (the rest is clipped anyway), drawn at the screen's sharpness.
+        let shown = NSRect(x: 0, y: 0, width: width, height: min(height, max(1, view.frame.height)))
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(shown.width * scale),
+                                         pixelsHigh: Int(shown.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = shown.size
+        view.cacheDisplay(in: shown, to: rep)
+        let image = NSImage(size: shown.size)
+        image.addRepresentation(rep)
+        kept.insert((key, image), at: 0)
+        if kept.count > 4 { kept.removeLast() }
+        return image
     }
 }

@@ -7,6 +7,11 @@ MainActor.assumeIsolated {
         Snapshot.render(to: dir)
         exit(0)
     }
+    #if DEBUG
+    if args.contains("--bench-notes") { NotesBench.run(); exit(0) }
+    if args.contains("--try-lists") { ListTrial.run(); exit(0) }
+    if let i = args.firstIndex(of: "--render-notes"), i + 1 < args.count { NotesRender.run(to: args[i + 1]); exit(0) }
+    #endif
 
     let app = NSApplication.shared
     let delegate = AppDelegate()

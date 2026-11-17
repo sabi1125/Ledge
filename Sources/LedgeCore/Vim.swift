@@ -169,7 +169,12 @@ public struct Vim {
         case "O":
             let at = b.lineStart(c)
             mode = .insert
-            return .apply(edit: Edit(range: NSRange(location: at, length: 0), text: "\n"), selection: caret(at))
+            // On a list or quote line, the new line above is an item of it too (o gets this from
+            // the typing helpers, like return).
+            let line = b.s.substring(with: NSRange(location: at, length: b.lineEnd(c) - at))
+            let start = Checklist.itemStart(for: line) ?? ""
+            return .apply(edit: Edit(range: NSRange(location: at, length: 0), text: start + "\n"),
+                          selection: caret(at + (start as NSString).length))
         case "x":
             return run(count: count, op: "d", name: "l", cursor: c, b)
         case "X":
