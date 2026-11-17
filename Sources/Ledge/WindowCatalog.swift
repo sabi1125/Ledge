@@ -30,6 +30,14 @@ final class WindowCatalog {
     /// The latest preview of each window (kept, so the switcher shows one at once next time).
     private(set) var previews: [CGWindowID: CGImage] = [:]
     private var activationObserver: NSObjectProtocol?
+    private var deactivationObserver: NSObjectProtocol?
+
+    private func captureOnLeave(_ pid: pid_t) {
+        guard Pref.bool(Pref.switcherOn), Pref.bool(Pref.switcherPreviews), Self.canCapture,
+              pid != ProcessInfo.processInfo.processIdentifier else { return }
+        let windows = Self.rawWindows(onScreenOnly: true).filter { $0.pid == pid && !notReal.contains($0.id) }
+        refreshPreviews(of: windows) { _ in }
+    }
 
     /// Windows each app says are real, standard windows (from Accessibility), by app. Browsers
     /// also have hidden helper windows and toolbar strips that look like windows to the window
@@ -46,6 +54,14 @@ final class WindowCatalog {
 
     private init() {
         // Each time you switch apps (any way), its front window counts as the most recent.
+        // Leaving an app: a fresh preview of its windows while they're still on screen, so they
+        // show one in the switcher later even from another desktop (where capturing isn't possible).
+        deactivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didDeactivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            let pid = app.processIdentifier
+            MainActor.assumeIsolated { self?.captureOnLeave(pid) }
+        }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
@@ -80,6 +96,13 @@ final class WindowCatalog {
         let alive = Set(candidates.map(\.id))
         real.formIntersection(alive)
         notReal.formIntersection(alive)
+        // Forget closed windows and quit apps (previews are a few MB each).
+        let allIDs = Set(Self.rawWindows(onScreenOnly: false).map(\.id))
+        previews = previews.filter { allIDs.contains($0.key) }
+        titleCache = titleCache.filter { allIDs.contains($0.key) }
+        handles = handles.filter { allIDs.contains($0.key) }
+        let runningPIDs = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+        icons = icons.filter { runningPIDs.contains($0.key) }
         let unknown = candidates.filter { !real.contains($0.id) && !notReal.contains($0.id) }
         guard !unknown.isEmpty else { return }
         scanning = true
@@ -461,12 +484,15 @@ final class WindowCatalog {
     /// Takes fresh previews of these windows in the background; `done` runs on the main
     /// thread for each one as it comes in.
     func refreshPreviews(of windows: [SwitcherWindow], done: @escaping (CGWindowID) -> Void) {
-        guard !windows.isEmpty else { return }
+        // Only windows on screen: macOS can't capture ones on another desktop (it refuses every
+        // time). Those keep the preview taken when you last left them (see `captureOnLeave`).
+        let visible = windows.filter(\.isOnScreen)
+        guard !visible.isEmpty else { return }
         guard Self.canCapture else {
             LedgeLog.shared.write("switcher: no previews (Screen Recording isn't allowed for Ledge)")
             return
         }
-        let wanted = Set(windows.map(\.id))
+        let wanted = Set(visible.map(\.id))
         Task { @MainActor in
             let content: SCShareableContent
             do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) }
@@ -475,11 +501,11 @@ final class WindowCatalog {
                 return
             }
             let matches = content.windows.filter { wanted.contains($0.windowID) }
-            LedgeLog.shared.write("switcher: taking \(matches.count) of \(wanted.count) previews")
             for w in matches {
                 let config = SCStreamConfiguration()
                 let scale: CGFloat = 2
-                let fit = min(1, 640 / max(w.frame.width, 1))
+                // The biggest preview the switcher draws is 420 pt wide: no need for more.
+                let fit = min(1, 440 / max(w.frame.width, 1))
                 config.width = Int(w.frame.width * fit * scale)
                 config.height = Int(w.frame.height * fit * scale)
                 config.showsCursor = false

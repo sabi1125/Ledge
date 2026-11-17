@@ -118,6 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsState.requestAccessibility = { [weak self] in self?.hider.requestPermission() }
         settingsState.revealIcons = { [weak self] in self?.hider.reveal() }
         settingsState.previewAnimation = { [weak self] in self?.islands.previewAnimation() }
+        // Debug hooks (the animation recorder, sample to-dos, test alerts): only in debug builds.
+        // Any app can post these notifications, so the installed (release) app doesn't listen.
+        #if DEBUG
         DistributedNotificationCenter.default().addObserver(forName: .init("local.sabir.ledge.reveal"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.islands.debugReveal() }
         }
@@ -139,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let args = (note.object as? String)?.split(separator: "|").map(String.init), args.count == 2 else { return }
             MainActor.assumeIsolated { self?.islands.debugRecord(style: args[0], to: args[1]) }
         }
+        #endif
         if Pref.bool(Pref.hideMenuBarIcons) {
             // Give other apps a moment to add their icons after login.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

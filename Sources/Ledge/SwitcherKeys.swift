@@ -89,10 +89,10 @@ final class SwitcherKeys {
     var shortcut: () -> SwitcherShortcut = { .saved }
     var enabled: () -> Bool = { true }
     /// While the shortcut field in settings is listening for a new shortcut.
-    nonisolated(unsafe) static var paused = false
+    @MainActor static var paused = false
     /// The shortcut field, while it listens: gets every key press first (⌘Tab included, which
     /// macOS never hands to an app's own window). Return true to keep the key from everything else.
-    nonisolated(unsafe) static var recorder: ((NSEvent) -> Bool)?
+    @MainActor static var recorder: ((NSEvent) -> Bool)?
 
     private var tap: CFMachPort?
     private var retry: Timer?
@@ -136,7 +136,9 @@ final class SwitcherKeys {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return pass
         }
-        if let recorder = Self.recorder {
+        // The tap runs on the main run loop, so the main-thread flags can be read here.
+        let (paused, recorder) = MainActor.assumeIsolated { (Self.paused, Self.recorder) }
+        if let recorder {
             let code = event.getIntegerValueField(.keyboardEventKeycode)
             if type == .keyDown, let ns = NSEvent(cgEvent: event), recorder(ns) {
                 swallowKeyUp.insert(code)
@@ -145,7 +147,7 @@ final class SwitcherKeys {
             if type == .keyUp, swallowKeyUp.remove(code) != nil { return nil }
             return pass
         }
-        guard enabled(), !Self.paused else { active = false; return pass }
+        guard enabled(), !paused else { active = false; return pass }
         let sc = shortcut()
         let flags = event.flags
         var held: NSEvent.ModifierFlags = []

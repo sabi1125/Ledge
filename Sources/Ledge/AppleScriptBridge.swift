@@ -72,7 +72,8 @@ extension AppleScriptBridge {
         }
         _ = done.wait(timeout: .now() + 5)
         LedgeLog.shared.write("applescript: started \(bundleID) hidden in the background")
-        startedHidden.insert(bundleID)
+        // Only ever touched on the main thread (the switcher reads it there).
+        DispatchQueue.main.async { MainActor.assumeIsolated { _ = startedHidden.insert(bundleID) } }
         // Some apps show a window anyway while they start up: hide it again for a few seconds,
         // unless you've brought the app forward yourself in the meantime.
         DispatchQueue.main.async {
@@ -87,11 +88,11 @@ extension AppleScriptBridge {
         }
     }
 
-    /// Apps Ledge started hidden in the background (not ones you opened). Read on the main thread.
-    nonisolated(unsafe) static var startedHidden = Set<String>()
+    /// Apps Ledge started hidden in the background (not ones you opened).
+    @MainActor static var startedHidden = Set<String>()
 
     /// The app is one Ledge started in the background and you haven't opened since.
-    static func isBackgroundHelper(_ app: NSRunningApplication) -> Bool {
+    @MainActor static func isBackgroundHelper(_ app: NSRunningApplication) -> Bool {
         guard let id = app.bundleIdentifier, startedHidden.contains(id) else { return false }
         if !app.isHidden { startedHidden.remove(id) } // you've shown it: it's yours now
         return app.isHidden

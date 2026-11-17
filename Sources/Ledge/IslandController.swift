@@ -277,12 +277,11 @@ final class IslandController {
         }
     }
 
-    private var todoHotKey: HotKey?
-    private var escapeHotKey: HotKey?
-    private var newNoteHotKey: HotKey?
-    private var newItemHotKey: HotKey?
-    private var settingsHotKey: HotKey?
-    private var pageHotKeys: [HotKey] = []
+    /// The shortcuts this island holds while it's open, by name.
+    private var shortcuts: [String: HotKey] = [:]
+    /// A shortcut was refused (another island hadn't let go of it yet): try again shortly.
+    private var shortcutRetry: DispatchWorkItem?
+    private var shortcutRetries = 0
 
     /// Esc that belongs to the text box you're typing in: a Japanese (or other) input method
     /// cancelling a conversion, or Vim going back to normal mode. The Esc hot key catches Esc
@@ -442,69 +441,61 @@ final class IslandController {
         if !m.isExpanded && !m.isShowingSettings && !m.isNoteEnlarged { steppedBack = false }
         if m.isHovering { steppedBack = false }
         let active = !steppedBack
-        let wanted = active && m.isExpanded && m.page == .calendar && m.calendarMode == .todos
-            && !m.isQuickAdding && m.openTodoID == nil && !m.isShowingSettings
-        if wanted, todoHotKey == nil {
-            todoHotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: cmdKey, id: 100 + displayID % 1000) { [weak self] in
-                self?.model.beginQuickAdd()
-            }
-        } else if !wanted, todoHotKey != nil {
-            todoHotKey = nil
-        }
+        let id = UInt32(displayID % 1000)
+
+        // Every shortcut this island can take, and whether it wants it right now.
+        struct Want { let name: String; let wanted: Bool; let key: Int; let mods: Int; let id: UInt32; let action: () -> Void }
+        var wants: [Want] = []
+        // ⌘T on the to-do list: a new to-do.
+        wants.append(Want(name: "todo", wanted: active && m.isExpanded && m.page == .calendar && m.calendarMode == .todos
+                            && !m.isQuickAdding && m.openTodoID == nil && !m.isShowingSettings,
+                          key: kVK_ANSI_T, mods: cmdKey, id: 100 + id) { [weak self] in self?.model.beginQuickAdd() })
         // ⌘N on the Calendar page: a new event (or a new to-do in To-dos mode), like the +.
         // (While quick add is open, ⌘N switches to its notes instead: that's handled by the window.)
-        let wantsNewItem = active && m.isExpanded && m.page == .calendar && !m.isQuickAdding
-            && m.openTodoID == nil && !m.isShowingSettings
-        if wantsNewItem, newItemHotKey == nil {
-            newItemHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 5000 + displayID % 1000) { [weak self] in
-                self?.model.beginQuickAdd()
-            }
-        } else if !wantsNewItem, newItemHotKey != nil {
-            newItemHotKey = nil
-        }
-        // ⌘N makes a new note while the island is open on the Notes page (taken from other apps
-        // only during that time, like ⌘T on the to-do list).
-        let wantsNewNote = active && (m.isExpanded && m.page == .notes || m.isNoteEnlarged) && !m.isShowingSettings
-        if wantsNewNote, newNoteHotKey == nil {
-            newNoteHotKey = HotKey(keyCode: kVK_ANSI_N, modifiers: cmdKey, id: 3000 + displayID % 1000) { [weak self] in
-                guard let self else { return }
-                self.model.beginNotesTyping()
-                self.notes.newNote()
-            }
-        } else if !wantsNewNote, newNoteHotKey != nil {
-            newNoteHotKey = nil
-        }
-        // ⌘, opens settings while the island is open (taken from other apps only during that time).
-        let wantsSettingsKey = active && m.isExpanded && !m.isShowingSettings
-        if wantsSettingsKey, settingsHotKey == nil {
-            settingsHotKey = HotKey(keyCode: kVK_ANSI_Comma, modifiers: cmdKey, id: 6000 + displayID % 1000) { [weak self] in
-                self?.model.openSettings()
-            }
-        } else if !wantsSettingsKey, settingsHotKey != nil {
-            settingsHotKey = nil
-        }
+        wants.append(Want(name: "newItem", wanted: active && m.isExpanded && m.page == .calendar && !m.isQuickAdding
+                            && m.openTodoID == nil && !m.isShowingSettings,
+                          key: kVK_ANSI_N, mods: cmdKey, id: 5000 + id) { [weak self] in self?.model.beginQuickAdd() })
+        // ⌘N on the Notes page (or the enlarged note): a new note.
+        wants.append(Want(name: "newNote", wanted: active && (m.isExpanded && m.page == .notes || m.isNoteEnlarged) && !m.isShowingSettings,
+                          key: kVK_ANSI_N, mods: cmdKey, id: 3000 + id) { [weak self] in
+            guard let self else { return }
+            self.model.beginNotesTyping()
+            self.notes.newNote()
+        })
+        // ⌘, opens settings while the island is open.
+        wants.append(Want(name: "settings", wanted: active && m.isExpanded && !m.isShowingSettings,
+                          key: kVK_ANSI_Comma, mods: cmdKey, id: 6000 + id) { [weak self] in self?.model.openSettings() })
         // ⌘1–⌘4 switch pages while the island is open (in the order of the dots).
-        let wantsPages = active && m.isExpanded && !m.isShowingSettings
-        if wantsPages, pageHotKeys.isEmpty {
-            let keys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4]
-            pageHotKeys = keys.enumerated().map { i, key in
-                HotKey(keyCode: key, modifiers: cmdKey, id: 4000 + UInt32(displayID % 100) * 10 + UInt32(i)) { [weak self] in
-                    self?.model.showPage(number: i + 1)
-                }
-            }
-        } else if !wantsPages, !pageHotKeys.isEmpty {
-            pageHotKeys = []
+        for (i, key) in [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4].enumerated() {
+            wants.append(Want(name: "page\(i)", wanted: active && m.isExpanded && !m.isShowingSettings,
+                              key: key, mods: cmdKey, id: 4000 + UInt32(displayID % 100) * 10 + UInt32(i)) { [weak self] in
+                self?.model.showPage(number: i + 1)
+            })
         }
-        // Esc while an island is open: it closes or steps back even when you only hovered it
-        // open (and it doesn't have the keyboard). Taken from other apps only while it's open.
-        let wantsEscape = active && (m.isExpanded || m.isShowingSettings || m.isNoteEnlarged)
-        if wantsEscape, escapeHotKey == nil {
-            escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0, id: 2000 + displayID % 1000) { [weak self] in
-                guard let self, !self.giveEscapeToTextBox() else { return }
-                _ = self.handleEscape()
-            }
-        } else if !wantsEscape, escapeHotKey != nil {
-            escapeHotKey = nil
+        // Esc while an island is open: it closes or steps back even when you only hovered it open.
+        wants.append(Want(name: "escape", wanted: active && (m.isExpanded || m.isShowingSettings || m.isNoteEnlarged),
+                          key: kVK_Escape, mods: 0, id: 2000 + id) { [weak self] in
+            guard let self, !self.giveEscapeToTextBox() else { return }
+            _ = self.handleEscape()
+        })
+
+        // First let go of everything not wanted (⌘N on Notes, before ⌘N on Calendar takes it)…
+        for w in wants where !w.wanted { shortcuts[w.name] = nil }
+        // …then take what is.
+        var refused = false
+        for w in wants where w.wanted && shortcuts[w.name] == nil {
+            let hotKey = HotKey(keyCode: w.key, modifiers: w.mods, id: w.id, action: w.action)
+            if hotKey.isRegistered { shortcuts[w.name] = hotKey } else { refused = true }
+        }
+        // Refused: usually the island on the other screen hasn't let go yet. Ask again shortly.
+        shortcutRetry?.cancel()
+        if refused && shortcutRetries < 10 {
+            shortcutRetries += 1
+            let work = DispatchWorkItem { [weak self] in self?.updateTodoShortcut() }
+            shortcutRetry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+        } else if !refused {
+            shortcutRetries = 0
         }
     }
 

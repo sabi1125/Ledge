@@ -16,8 +16,14 @@ final class HotKey {
         let hotKeyID = EventHotKeyID(signature: OSType(0x4C44_4745), id: id) // "LDGE"
         let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
         // Fails when another app already uses the same shortcut.
-        if status != noErr { LedgeLog.shared.write("hotkey \(id): couldn't register (\(status)), another app may use it") }
+        if status != noErr {
+            ref = nil
+            LedgeLog.shared.write("hotkey \(id): couldn't register (\(status)), another app may use it")
+        }
     }
+
+    /// macOS accepted it (it refuses a shortcut something else already holds).
+    var isRegistered: Bool { ref != nil }
 
     deinit {
         if let ref { UnregisterEventHotKey(ref) }
