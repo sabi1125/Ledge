@@ -112,13 +112,7 @@ struct IslandRootView: View {
         .contentShape(outline)
         .shadow(color: .black.opacity(shape.isOpen || shape == .settings || shape == .drop ? 0.5 : 0), radius: 16, y: 6)
         .onTapGesture { model.clicked() }
-        .contextMenu {
-            Button("Ledge Settings…", action: openSettings)
-            Divider()
-            Button("Quit Ledge") { NSApp.terminate(nil) }
-        }
-        // Files dropped anywhere on the island go into the tray.
-        .onDrop(of: [UTType.fileURL], isTargeted: $dropOver) { providers in model.acceptDrop(providers) }
+        .modifier(IslandInteractions(enabled: !Self.drawingSnapshot, openSettings: openSettings, model: model, dropOver: $dropOver))
         .onChange(of: dropOver) { _, over in model.setFileDragOver(over) }
         .padding(.top, IslandLayout.topGap(style: style))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -199,6 +193,9 @@ struct IslandRootView: View {
 
     /// Debug only: writes every size change to the log (set by the animation recorder).
     static var logMoves = false
+    /// `--snapshot` is drawing: the right-click menu and the file drop are left off (the image
+    /// renderer can't draw them and paints yellow boxes instead).
+    static var drawingSnapshot = false
 
     /// Content only fades in and out (never scales), in the chosen animation style.
     private static var fade: AnyTransition { IslandAnimation.current.content }
@@ -895,6 +892,29 @@ struct MeetingPill: View {
             }
             .buttonStyle(.plain)
             .help("Dismiss")
+        }
+    }
+}
+
+
+/// The island's right-click menu, and files dropped on it going into the tray.
+private struct IslandInteractions: ViewModifier {
+    var enabled: Bool
+    var openSettings: () -> Void
+    var model: IslandModel
+    @Binding var dropOver: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .contextMenu {
+                    Button("Ledge Settings…", action: openSettings)
+                    Divider()
+                    Button("Quit Ledge") { NSApp.terminate(nil) }
+                }
+                .onDrop(of: [UTType.fileURL], isTargeted: $dropOver) { providers in model.acceptDrop(providers) }
+        } else {
+            content
         }
     }
 }

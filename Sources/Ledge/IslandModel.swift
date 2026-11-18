@@ -722,7 +722,11 @@ final class IslandModel: ObservableObject {
     /// pointer away by mistake never closes it or loses what you're typing.
     private func collapseIfIdle() {}
 
+    /// `--snapshot`: the shape it asked for stays, whatever else changes while it's drawn.
+    var shapeFrozen = false
+
     private func recompute() {
+        guard !shapeFrozen else { return }
         if !pages.isEmpty && !pages.contains(page) { page = pages.first! }
         if isExpanded && pages.isEmpty { isExpanded = false }
         let next: IslandShape

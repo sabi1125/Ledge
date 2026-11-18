@@ -15,10 +15,12 @@ final class Updater: ObservableObject {
 
     @Published private(set) var state: State = .idle
 
-    /// The project folder that holds the source (the git repository).
+    /// The project folder that holds the source (the git repository): the `sourceFolder` setting
+    /// if set, else the folder this copy was built from (written by scripts/build.sh), else ~/Ledge.
     var folder: URL {
         let custom = UserDefaults.standard.string(forKey: "sourceFolder")
-        return URL(fileURLWithPath: custom ?? (NSHomeDirectory() + "/Ledge"))
+        let builtFrom = Bundle.main.object(forInfoDictionaryKey: "LedgeSource") as? String
+        return URL(fileURLWithPath: custom ?? builtFrom ?? (NSHomeDirectory() + "/Ledge"))
     }
 
     /// The saved version this copy of Ledge was built from (written by scripts/build.sh).

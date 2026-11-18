@@ -1,78 +1,183 @@
 # Ledge
 
-A personal, Alcove-style notch app for your MacBook Pro. It's for your own use only, and it's never released.
+A Dynamic Island for your Mac's notch. Ledge turns the notch on a MacBook (and a small pill on external displays) into a live strip for music, meetings, timers and indicators, and opens into a panel for your calendar, to-dos and notes.
 
-## Using it
+<p align="center"><img src="docs/images/music.png" width="640" alt="The open island on the Music page: album art, song title, a progress bar and playback controls"></p>
 
-- **Music:** when something plays (Apple Music, Spotify, YouTube in a browser, anything that shows in Control Center), the notch widens to show the album art and a waveform.
-- **Open the island:** hover over the notch, click it, or press **⌘L** from anywhere (⌘L again closes it; on the Notes page the cursor goes straight into the note). ⌘L is taken from every app while Ledge runs, including the browsers' "go to the address bar". Once open, it stays open until you press **⌘L** or **Esc**: moving the pointer away or clicking somewhere else never closes it, so you can work in other apps (or drag files from Finder) with it open. After a click elsewhere it steps back: ⌘N, ⌘T, ⌘1–⌘4, ⌘, and Esc go to the app you clicked into until you point at the island again (⌘L always works). It always opens where you left it: the same page, and if you were in quick add or had a to-do open, right back there with what you typed. Its pages are **Music** (shown only when something's loaded in a player), **Calendar**, **Timer** and **Notes**. Swipe left or right with two fingers to move between them, click the dots at the top right, or press **⌘1–⌘4** (in the order of the dots; to Notes, the cursor goes straight into the note). Switch any page off in settings. With the trackpad tick on, you feel a light tick as it opens.
-- **Music:** scrub, play/pause and skip. In the small music view (closed island), a two-finger swipe skips tracks.
-- **Calendar:** today's date and your next events from the Calendar app, with a **Join** button for Zoom, Meet, Teams and Webex links. Click an event to open it in the Calendar app. Finished events drop off, and what's next is on top: the meeting you're in, then today's meetings, then today's all-day items and anything longer than 4 hours (an "in office" block), then tomorrow the same way. It asks for Calendar access the first time.
-- **Quick add:** press **⌘T** while the island is open on the to-do list, **⌃⌥E** (new event) or **⌃⌥T** (new to-do) from anywhere, or click the **+** beside the page dots on the Calendar page and type an event in one line, like "Dentist tomorrow 3pm" or "Gym fri 7-8pm". The date badge and a preview show what Ledge understood. Press **return** to save it to your iCloud calendar (the one called Personal or Home, if there is one), or **Esc** to cancel. **⌘N** opens a notes box (return makes a new line there, **⌘return** saves, and ⌘N or Esc goes back to the title line). With no day or time in the text, return saves an all-day event today, and the preview says so first. After saving, **⌘Z** or Undo removes it again, and **Open in Calendar** (or **Open in Reminders**) shows what was saved.
-  - **Dates:** "tomorrow", "fri", "dec 3", "2027-01-20" (ISO), "in 3 days", "next week" (Monday), and ranges: "Gunma trip jan 20 2027 to jan 25 2027" or "Gym from 5pm dec 1 to 7pm" (a range needs "to", "until" or a dash between the two ends).
-  - **Times from now:** "in 3 hours", "30 min from now". In to-dos, "remind me to charge the laptop in 3 hours" drops the "remind me to" and sets an alarm at that time, so Reminders makes a sound.
-  - **Repeats:** "every day", "every monday", "weekdays", "every weekend", "every 2 weeks", "monthly", "yearly", optionally "until dec 2027". "Gym every weekend from 5 to 8" makes a repeating 5–8pm event on Saturdays and Sundays. The preview says how it repeats. Copy and paste work while typing. If quick add closes by accident (a click elsewhere), what you typed is still there next time; Esc cancels and clears it.
-- **To-dos:** the **Events · To-dos** switch at the top left of the Calendar page shows all your open to-dos from the Reminders app, in every list. With more than 2, the island opens bigger so they all show at once (past about 7 it scrolls). The order: in progress first, then due today or overdue, then no due date, then upcoming (musts first within each). Click a circle to tick one off (Undo shows for a moment), right-click it to mark it in progress, and click a to-do to open its steps. Steps are checkbox lines in its notes (`- [ ] reply to the feedback`); the list shows them as **2/4**, and the to-do you're working on shows its next step right under it. In To-dos mode the **+** adds a reminder: `! Reply to the review fri #s3 [30m]` is a must, due Friday, in the list whose name starts with "s3" (a new list if none matches, and the preview says **New list** in orange first), with a 30 min guess (kept at the end of the title, so it shows in Reminders too). While you type a `#`, your lists show under the line with their colors: **Tab** takes the first, a click takes any, and **Esc** hides them. A list name with spaces goes in with dashes (`#Side-project`). A link in the text is saved at the top of its notes (the Reminders app doesn't show links other apps save in its link field), and the ↗ opens it. An opened to-do's notes are editable and drawn as Markdown (headings, bold, checkboxes you can tick, links), like the Notes page. In an opened to-do, Markdown links like `[google](www.google.com)` show as "google" and open on click; bare links show by their last part (a Backlog link shows as "CONTRACT-9508"). In the notes box (⌘N), typing `[] ` makes a checkbox and return continues the list. Ledge asks for Reminders access the first time.
-- **Timer:** pick a preset or add minutes, then Start. While it runs, the countdown shows in orange beside the notch. When it's done, a "Timer done" pill drops down with a sound.
-- **Pomodoro:** use the Timer / Pomodoro switch on the Timer page. Focus (25 min, red) and breaks (5 min, green) alternate, with a long break (15 min) after 4 focus sessions. Use Skip to jump to the next phase and Reset to start over. The countdown shows beside the notch, and a pop and sound mark each phase change. Lengths, number of sessions, and auto-start are in settings. Only one of the timer and the pomodoro counts down at a time.
-- **Stay awake:** the coffee cup in the open island's top bar keeps your Mac awake (like `caffeinate`). Click it for your default length, or right-click or hold it to choose 15 min, 30 min, 1 h, 2 h, or until you turn it off. It turns orange with the time left, and a short pop shows when it starts and ends. In settings you can choose the default length, whether the screen stays on too, and whether to stay awake automatically while charging. Closing the lid still sleeps the Mac.
-- **Notes:** your notes live in Apple Notes, in a folder called **Ledge** (made for you), so they're the same notes as in the Notes app and on your iPhone. The page shows the list on the left and the open note on the right: a **title** (the note's first line in Notes) and the text. Click the pencil or press **⌘N** for a new note (the cursor goes to its title); the sidebar button or **⌥⌘S** hides or shows the list; edits save to Notes a moment after you stop typing. **Search** above the list filters by title and text. The trash button deletes the open note after a second click on "Delete?" (it goes to Recently Deleted in Notes, so it can be restored). **Open in Notes** opens it in the Notes app (for pictures, tables or sharing). Like every notes box in Ledge, it sits right on the black with just the cursor, `[] ` makes a checkbox (kept as `- [ ]` text in Notes), return continues a list, and Tab / ⇧Tab indent a list line by 4 spaces. On the Notes page, Markdown is drawn as you type, like Notion: `#`/`##`/`###` headings, `**bold**`, `*italic*`, `~~struck~~`, `` `code` `` in a small box, links (⌘-click opens one), bullets (●○◆◇ by indent), numbered lists, checkboxes you can click to tick, `> ` quotes with a purple bar, ```` ``` ```` blocks in a grey box (typing ```` ``` ```` puts the closing one in for you), and `---` as a line. The marks (`##`, `**`, `` ` ``, the link address) hide and come back on the line the cursor is on, so you can edit them. Return continues a list, numbered list or quote (`2.` after `1.`), return on an empty one ends it (an empty nested one moves out a level instead), and return right before an item's text pushes it down. In Vim, `o` and `O` start a new item below or above, like return. Backspace right before an item's text removes its bullet, box or `>` in one go. The text stays plain Markdown, so the Notes app shows the same note. The first time, macOS asks to let Ledge control Notes. Ledge starts the Notes app hidden in the background (it never shows up as a window or in the window switcher). **Enlarge:** the expand button or **⌘E** grows the open note out of the island into a big card in the middle of the screen, without the list, for longer writing. **Esc**, **⌘E** again, or a click outside brings it back into the island at its old size. Your old scratch note (`Notes.txt`) is moved into the Ledge folder once, as "Scratch note". With **Vim motions** on (settings → Text editor), the note opens in normal mode with a solid orange block cursor: `i` `a` `o` and friends start typing, Esc goes back. The block stays steady in normal mode and blinks in insert mode (once you stop typing), so you can tell which one you're in. Counts, `hjkl`, `w b e` (Japanese splits into kanji, hiragana and katakana words, like Vim), `0 ^ $`, `gg G`, `f t`, `d c y` with any motion, `dd yy p`, `x r J`, `u` / `⌃R`, `v V`, and text objects like `ciw`, `di"` and `da(` all work. Esc in normal mode still closes the island.
-- **Tray:** drag up to 5 files or folders onto the notch (or onto the open island, on any page) to hold them there. As a Finder drag gets near the top of the screen, the notch grows into a drop target; let go and a pop says what it holds ("Holding 2 files in tray"). The tray stays hidden: press **⌃⌥F** from anywhere to show it under the page you're on (again to hide; it also hides when the island closes). While hidden, a small tray and the count sit beside the page dots; click it to show the tray. Hover an item for its name, size, kind and folder right away; drag it out to drop a copy anywhere (it stays in the tray), double-click to open it, the × removes it, and right-click has Quick Look, Show in Finder, Remove and Clear All. It holds 5 at a time: for more, put them in a folder and drop the folder (too many shows in amber and nothing is taken). The tray only points at your files, so they stay where they are, and it remembers them after a restart (a file you moved or deleted drops off). Turn it off in settings → Pages.
-- **Window switcher:** hold **⌥** and press **Tab** (the default; set any shortcut, **⌘Tab** included, in settings → Window switcher) and every window comes out of the notch, on the screen you're using: two Chrome windows show as two, windows on other desktops and in full screen too, most recent first. Keep holding and press Tab to step on, ⇧Tab or the arrows to step back, let go to switch, Esc to cancel, or click a window. It works between two full-screen windows of the same app. Pick one of four looks in settings: **Strip** (the default), **Grid**, **Focus** or **List**. Window previews need **Screen Recording** permission (System Settings → Privacy & Security); without it the switcher shows app icons. Previews are taken of windows you can see, and refreshed as you leave an app. Choosing ⌘Tab replaces macOS's app switcher while Ledge runs. Quit other switchers (BetterCmdTab, AltTab and the like) first, or they take the keys before Ledge does. Needs Accessibility, like the volume keys.
-- **Meeting heads-up:** 5 minutes before a meeting, a countdown in its calendar color sits beside the notch (in place of the music or timer; with the title on the floating pill). A minute before, a pill drops down with the title, how soon ("in 0:42", "now", "2 min ago"), and **Join** (Zoom, Meet, Teams or Webex) or **Open** (in Calendar) for a meeting without a link, with a soft sound. Click the title to open the event in Calendar, × to dismiss. Hovering doesn't open the island over it (so you can reach Join); a click on the rest of the pill does. It stays until you join or dismiss it, or 5 minutes after the start. All-day events, declined meetings and blocks longer than 4 hours are skipped; back-to-back, the next meeting takes over. Turn it off in settings → Indicators, where **Try it** plays a sample meeting (a few seconds of countdown, then the pill).
-- **Indicators:** volume, brightness, plugging in the charger, and low battery (20%, 10%, 5%) all show in the notch.
-- **Settings:** click the gear in the open island's top bar, press **⌘,** while it's open, open Ledge from Spotlight or the Applications folder, or right-click the island and choose Ledge Settings. The island grows into a wide settings panel (it isn't one of the swipe pages). Switch any page, indicator or behavior on or off, turn on Vim motions for notes, pick an animation style, check for updates, or quit. Close it with ✕, Done, Esc or ⌘L.
-- **Animation styles:** Morph and blur, Drop down, Stretch, or Calm (the default). Picking one replays the settings panel in that style. In every style the content only fades, so nothing shrinks or zooms.
+It's free, open source (MIT) and native: Swift, SwiftUI and AppKit, with no accounts, no tracking and no network services of its own. Your calendar, to-dos and notes stay in Apple's own apps (Calendar, Reminders and Notes), so they sync to your iPhone the way they always have.
 
-## External displays
+**Contents:** [Features](#features) · [Requirements](#requirements) · [Install](#install) · [Permissions and privacy](#permissions-and-privacy) · [Shortcuts](#keyboard-shortcuts) · [Troubleshooting](#troubleshooting) · [How it works](#how-it-works) · [Contributing](#contributing) · [License](#license)
 
-Screens without a notch get a floating pill at the top center, like the original iPhone Dynamic Island. It has the same features and stays visible on normal desktops. It's kept off full-screen desktops (apps and videos) at the macOS level, so it never flickers when you swipe. On a full-screen desktop, rest the pointer at the top edge and the pill fades in along with the menu bar, then fades out when you move away. ⌘L, quick add (⌃⌥E / ⌃⌥T) and settings bring it in too, and it stays while the island is open. The notch island on the MacBook screen stays put on full-screen desktops (a full-screen browser or video), where the strip beside the notch is black anyway. It also hides during Mission Control. Turn it off with "Show Ledge on other displays" in settings. With the lid closed (only external displays), the main display always gets the pill, even with that setting off. Plugging a display in or out adds or removes its island; an island that goes away lets go of its shortcuts at once.
+## Features
 
-## Clean menu bar
+### Music in the notch
 
-Menu bar icons are removed in **System Settings → Menu Bar** (there's a button in Ledge's settings). Turn off every app, and for Apple's icons, keep only **Wi-Fi** and **Battery**. This removes them completely.
+When something plays (Apple Music, Spotify, a browser tab, anything that shows in Control Center), the notch widens to show the album art and a waveform. Open the island to scrub, pause and skip; in the closed island, a two-finger swipe skips tracks.
 
-Ledge also has an optional "Hide other apps' menu bar icons" setting (off). It squeezes icons into macOS's hidden-items overflow and leaves macOS's overflow chevron showing, so it's only useful for apps that can't be turned off in System Settings. When it's on, it needs Accessibility access, and **⌃⌥⌘M** shows the hidden icons for 8 seconds.
+<p align="center"><img src="docs/images/compact-music.png" width="450" alt="The closed island with album art on the left of the notch and a waveform on the right"></p>
 
-## Updating
+### Calendar and to-dos
 
-In Ledge's settings, **Check for updates** compares your copy with GitHub (`sabi1125/Ledge`), lists what's new, and **Update and restart** pulls it and reinstalls. Or, from the terminal:
+The Calendar page shows today's date and your next events, with **Join** for Zoom, Meet, Teams and Webex links; click an event to open it in Calendar. The **Events · To-dos** switch shows your open reminders from every list, with steps (`- [ ]` lines in a reminder's notes), in-progress and "must" markers.
+
+<p align="center"><img src="docs/images/calendar.png" width="590" alt="The Calendar page: the date on the left, and three upcoming events with Join buttons"></p>
+
+**Quick add** turns one line into an event or reminder: press **⌃⌥E** (event) or **⌃⌥T** (to-do) from anywhere, or click **+**. A preview shows what Ledge understood before you press return.
+
+| You type | You get |
+| --- | --- |
+| `Dentist tomorrow 3pm` | An event tomorrow at 3 pm |
+| `Gunma trip jan 20 2027 to jan 25 2027` | A multi-day event |
+| `Gym every weekend from 5 to 8` | A repeating 5–8 pm event on Saturdays and Sundays |
+| `remind me to charge the laptop in 3 hours` | A reminder with an alarm in 3 hours |
+| `! Reply to the review fri #work [30m]` | A must-do reminder due Friday, in your "work" list, with a 30 min estimate |
+
+It also understands ISO dates (`2027-01-20`), "in 3 days", "next week", "until dec 2027", "weekdays", "every 2 weeks", "monthly" and more. ⌘Z undoes a save.
+
+### Meeting heads-up
+
+Five minutes before a meeting, a countdown in its calendar color sits beside the notch. A minute before, a pill drops down with **Join** (or **Open** for a meeting without a link). All-day events, declined meetings and long blocks are skipped. Try it from settings → Indicators.
+
+<p align="center">
+  <img src="docs/images/meeting-countdown.png" width="450" alt="A meeting countdown beside the notch, showing 4:23">
+  <img src="docs/images/meeting-pill.png" width="500" alt="The meeting pill under the notch: Design review, in 0:43, a blue Join button">
+</p>
+
+### Notes
+
+Your notes live in Apple Notes (in a folder called **Ledge**), so they're on your iPhone too. The editor draws Markdown as you type: headings, bold and italic, checkboxes you can tick, lists, quotes, inline code and code blocks. The marks show again on the line you're editing. **⌘E** enlarges a note into a big card in the middle of the screen for longer writing. Optional **Vim motions** (settings → Text editor) cover counts, motions, operators, text objects and visual mode.
+
+<p align="center"><img src="docs/images/notes.png" width="590" alt="The Notes page: a list of notes on the left, and a note with a heading, checkboxes, bold text and inline code"></p>
+
+### Timer and Pomodoro
+
+A countdown timer and a Pomodoro cycle (focus, short breaks, a long break), with the time beside the notch while it runs and a pop when a phase ends.
+
+<p align="center">
+  <img src="docs/images/timer.png" width="450" alt="A running timer beside the notch, showing 25:00">
+  <img src="docs/images/pomodoro.png" width="590" alt="The Timer page in Pomodoro mode, focus session 1 of 4 at 25:00, with Pause, Skip and Reset">
+</p>
+
+### Window switcher
+
+Hold **⌥** and press **Tab** (or set any shortcut, ⌘Tab included) and every window comes out of the notch: two Chrome windows show as two, and windows on other desktops and in full screen are included. Four looks: Strip, Grid, Focus and List. Previews need the Screen Recording permission; without it, the switcher shows app icons.
+
+### And more
+
+- **Indicators:** volume, brightness, charging and low battery show in the notch instead of the macOS pop-ups.
+- **Tray:** drop up to 5 files on the notch to keep them handy, then drag them out anywhere (**⌃⌥F** shows the tray).
+- **Stay awake:** the coffee cup keeps your Mac awake for a set time, like `caffeinate`.
+- **External displays:** screens without a notch get a floating pill with the same features. It stays off full-screen desktops, and fades in when you point at the top edge.
+- **Animations:** four styles (Calm, Stretch, Drop down, Morph and blur), and a trackpad tick when the island opens.
+
+<p align="center"><img src="docs/images/volume.png" width="450" alt="The volume indicator under the notch at 62"> <img src="docs/images/external-pill.png" width="500" alt="The floating pill on an external display, playing Golden Hour Drive by Sunline"></p>
+
+## Requirements
+
+- A Mac with Apple silicon and macOS 15 or later. It works best on a MacBook with a notch; other screens get the floating pill.
+- To build it: Xcode with Swift 6. Ledge is built and tested with Xcode 27 (Swift 6.4) on macOS 27.
+
+There's no downloadable app yet: you build it from source, which takes a minute or two.
+
+## Install
 
 ```bash
-~/Ledge/scripts/install.sh
+git clone https://github.com/sabi1125/Ledge.git
+cd Ledge
+scripts/install.sh
 ```
 
-Either way, this rebuilds the app, replaces `/Applications/Ledge.app` and restarts it. If an update from settings fails, the settings panel says so; the details are in `~/Library/Logs/Ledge-update.log`. Permissions such as Accessibility carry over, because every build is signed with the same personal certificate, **Ledge Local Signing**, which lives in your login keychain. If that certificate is ever deleted, builds fall back to ad-hoc signing, and macOS will then ask for Accessibility again after each update.
+`install.sh` builds a release copy, puts it in `/Applications`, and opens it. Ledge then asks for the permissions it needs (see below), and opens at login (switch that off with **Open at login** in settings → General).
 
-If a build stops with **"✗ Signing failed"** and `errSecInternalComponent`, macOS wants permission to use the certificate (it often asks with a keychain prompt; click **Always Allow**). To allow it for good, run this once and type your login password when asked:
+To **update**, use **Check for updates** in settings → General, which pulls the latest version and reinstalls it, or run `scripts/install.sh` again.
+
+### Signing your builds (recommended)
+
+macOS ties permissions like Accessibility to an app's signature. Without a signing certificate, Ledge is signed ad hoc, and every new build looks like a different app to macOS, so you'd grant Accessibility again after each update. To avoid that, make a free self-signed certificate once:
+
+1. Open **Keychain Access**, then choose **Keychain Access → Certificate Assistant → Create a Certificate…**
+2. Name it exactly **Ledge Local Signing**, set **Certificate Type** to **Code Signing**, and click **Create**.
+3. Build again with `scripts/install.sh`. The build finds the certificate by its name and uses it from then on.
+
+The first build with it may ask whether `codesign` can use the key; click **Always Allow**. If the build stops with `errSecInternalComponent`, see [Troubleshooting](#troubleshooting).
+
+## Permissions and privacy
+
+Ledge asks only for what a feature needs, and each feature works without the others.
+
+| Permission | Used for | Without it |
+| --- | --- | --- |
+| Accessibility | The window switcher, the volume and brightness keys, the menu bar hider | Those features stay off; the keys work as usual with the macOS pop-ups |
+| Screen Recording | Window previews in the switcher | The switcher shows app icons |
+| Calendar | Events, quick add, the meeting heads-up | The Calendar page asks for access |
+| Reminders | To-dos | The To-dos side asks for access |
+| Automation (Notes) | The Notes page reads and writes the "Ledge" folder in Apple Notes | The Notes page explains how to allow it |
+
+What stays where:
+
+- Ledge has no servers, accounts or analytics. The only network request it makes itself is `git fetch` when you check for updates.
+- Window previews are kept in memory and never saved to disk.
+- The log (`~/Library/Logs/Ledge.log`) records problems only, unless you turn on verbose logging. Remove titles before sharing it, since it can include window, song or event names.
+
+## Keyboard shortcuts
+
+| Shortcut | What it does |
+| --- | --- |
+| ⌘L | Open or close the island, from anywhere |
+| ⌃⌥E / ⌃⌥T | Quick add an event / a to-do, from anywhere |
+| ⌃⌥F | Show or hide the tray |
+| ⌥Tab | Window switcher (changeable, ⌘Tab included) |
+| ⌘1–⌘4 | Switch pages while the island is open |
+| ⌘N | New event (Calendar page) or new note (Notes page) |
+| ⌘T | New to-do (on the to-do list) |
+| ⌘E | Enlarge the note, or put it back |
+| ⌥⌘S | Show or hide the notes list |
+| ⌘, | Settings |
+| Esc | Step back, or close the island |
+| ⌃⌥⌘M | Show the hidden menu bar icons for 8 seconds (with the menu bar hider on) |
+
+⌘L is taken from every app while Ledge runs, including the browser's "go to the address bar".
+
+## Troubleshooting
+
+**The build stops with "✗ Signing failed" and `errSecInternalComponent`.** macOS wants your permission for `codesign` to use the certificate. Click **Always Allow** if a keychain prompt shows, or allow it for good by running this once (it asks for your login password):
 
 ```bash
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db
 ```
 
-## Volume and brightness keys
+**A permission keeps getting asked for again after every update.** Your builds are signed ad hoc. Make the certificate in [Signing your builds](#signing-your-builds-recommended).
 
-Ledge handles these keys itself, so only its drop-down indicator appears and macOS's pop-up doesn't. This needs Accessibility. Without it, the keys work normally with the macOS pop-up. ⇧⌥ + key changes the level in smaller steps.
+**The switcher or the volume keys don't react.** Check System Settings → Privacy & Security → Accessibility, and switch Ledge off and on again there (each ad-hoc build needs a new grant). Quit other window switchers (AltTab, BetterCmdTab…), since the first app to catch the keys wins.
 
-## After a macOS update, check…
-
-Some features use private macOS functions, which an update can rename or remove. At launch Ledge checks them all and writes either "private APIs: all … found" or a "private APIs missing" line naming each one and the feature it's for to the log. If something stops working after an update, look there first:
+**Something stopped working after a macOS update.** Some features rely on private macOS functions, which an update can change. Ledge checks them at launch and logs what's missing:
 
 ```bash
 grep "private APIs" ~/Library/Logs/Ledge.log | tail -1
 ```
 
-What to try by hand: music in the notch (the perl bridge), the brightness keys, the external pill on full-screen desktops, and the window switcher (windows on other desktops, switching to a full-screen window).
+**The Notes page says it's waiting for the Notes app.** Notes can take several seconds to answer after it's been idle; Ledge keeps anything you type meanwhile.
 
-## Uninstalling
+**More detail in the log.** Turn on verbose logging, restart Ledge, and look at `~/Library/Logs/Ledge.log`:
 
-Quit Ledge (right-click the notch → Quit), delete `/Applications/Ledge.app`, and remove it from System Settings → General → Login Items.
+```bash
+defaults write local.sabir.ledge verboseLog -bool true
+```
 
-## How it's built
+**Uninstalling.** Quit Ledge (right-click the notch → Quit Ledge), delete `/Applications/Ledge.app`, and remove it from System Settings → General → Login Items.
 
-- `Sources/Ledge`: the app (SwiftUI + AppKit). It has a floating panel over the notch, the island views, and monitors for volume, brightness and battery, plus the menu bar hider.
-- `Sources/LedgeCore`: pure logic with unit tests (`swift test`).
-- `Bridge/`: the music bridge. macOS only shares now-playing info with Apple-signed programs, so Ledge runs a small library inside `/usr/bin/perl`, which is Apple-signed, to read it. This is the same workaround other notch apps use.
-- Log file: `~/Library/Logs/Ledge.log`. It keeps problems only (failures, refusals, timeouts) and starts over at 1 MB, keeping the previous one as `Ledge.old.log`. For everything (moves, pages, music, the switcher), run `defaults write local.sabir.ledge verboseLog -bool true` and restart Ledge.
-- `Ledge --snapshot DIR` draws every island state to PNG files using sample data.
-- Debug builds only (`swift build`; the installed release app ignores these): posting the distributed notification `local.sabir.ledge.record` with `"<style>|<folder>"` makes Ledge play that animation on the notch and save it frame by frame.
+## How it works
+
+- `Sources/Ledge` is the app: a borderless panel over the notch on each screen, the island views (SwiftUI), and monitors for volume, brightness, battery, displays and full-screen desktops (AppKit).
+- `Sources/LedgeCore` holds the logic that has no UI, such as the quick add parser, the island layout, Vim motions, Markdown styling and the meeting schedule. It's covered by unit tests: `swift test`.
+- `Bridge/` reads what's playing. macOS only shares now-playing information with Apple-signed programs, so Ledge loads a small library into `/usr/bin/perl` (which is Apple-signed) to read it. Other notch apps use the same workaround.
+- **Private APIs.** The window switcher, the brightness keys and keeping the external pill off full-screen desktops use undocumented macOS functions. They're all listed in `Sources/Ledge/PrivateAPIs.swift`, checked at launch, and each feature turns itself off if its function is missing. Because of this, Ledge can't go on the Mac App Store.
+- `Ledge --snapshot DIR` (from `.build/debug/Ledge` after `swift build`) draws every island state to images with sample data. That's how the screenshots in this README were made.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Issues are public, so leave your own window, song, event and note titles out of them.
+
+## License
+
+[MIT](LICENSE) © 2026 sabir. Ledge isn't affiliated with Apple; "Dynamic Island" is Apple's name for the iPhone feature that inspired it.

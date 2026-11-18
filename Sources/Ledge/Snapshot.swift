@@ -11,6 +11,7 @@ enum Snapshot {
         Pref.registerDefaults()
         SettingsPanel.scrolls = false
         RightClickCatcher.enabled = false
+        IslandRootView.drawingSnapshot = true
         let notch = NotchMetrics(width: 185, height: 32)
         let cases: [(String, IslandShape, HUD?, Bool, IslandPage)] = [
             ("f1-pill-idle", .idle, nil, false, .music),
@@ -94,15 +95,16 @@ enum Snapshot {
             let calendarStore = CalendarStore()
             calendarStore.useSample(sampleEvents)
             let notesStore = NotesStore(sample: name == "10-notes"
-                ? "Buy oat milk\nCall the landlord about the heater\nIdea: notch timer for pomodoros"
+                ? "## This week\n- [x] Call the landlord about the heater\n- [ ] Buy oat milk\n- [ ] Try **pomodoros** with the notch timer\n> Run `swift test` before pushing"
                 : "")
             let model = IslandModel()
             let floating = name.hasPrefix("f")
             model.style = floating ? .floating : .notch
             model.notch = floating ? .floatingPill(menuBarHeight: name.contains("menubar") ? 25 : (name.contains("music") ? 0 : 25)) : notch
             var media = NowPlayingState()
-            media.title = name.hasPrefix("f2c") ? "The Fall" : (name.hasPrefix("f2") ? "Tom's Diner" : "Golden Hour Drive")
-            media.artist = name.hasPrefix("f2c") ? "Gregory Alan Isakov" : (name.hasPrefix("f2") ? "AnnenMayKantereit, Giant Rooks" : "Sunline")
+            // Made-up songs: a short one, and a long one that has to be cut off in the floating pill.
+            media.title = name.hasPrefix("f2c") ? "Fall" : (name.hasPrefix("f2") ? "Golden Hour Drive" : "Golden Hour Drive")
+            media.artist = name.hasPrefix("f2c") ? "Lowtide" : (name.hasPrefix("f2") ? "Sunline and the Harbor Lights Orchestra" : "Sunline")
             media.duration = 228
             media.elapsed = 96
             media.isPlaying = playing
@@ -115,12 +117,13 @@ enum Snapshot {
             if name.contains("meeting") {
                 let link = !name.contains("nolink")
                 model.meeting = .init(id: "m", title: link ? "Design review" : "Lunch with Mina",
-                                      start: now.addingTimeInterval(name.contains("countdown") ? 262 : 42),
+                                      start: Date().addingTimeInterval(name.contains("countdown") ? 263 : 43),
                                       color: link ? Color(red: 0.88, green: 0.35, blue: 0.61) : .green,
                                       joinURL: link ? URL(string: "https://meet.google.com/abc-defg-hij") : nil,
                                       eventID: nil, phase: name.contains("countdown") ? .countdown : .alert)
             }
             model.forceShape(shape, hud: hud, page: page)
+            model.shapeFrozen = true
 
             let panel = IslandLayout.panelSize(notch: model.notch, style: model.style)
             let view = ZStack(alignment: .top) {
@@ -133,11 +136,27 @@ enum Snapshot {
             }
             .frame(width: panel.width, height: panel.height)
 
-            let renderer = ImageRenderer(content: view)
-            renderer.scale = 2
-            if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
-               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+            // Drawn in a real (off-screen) window, so AppKit-backed parts (text fields, the waveform,
+            // scrolling lists) come out as they look on screen; SwiftUI's ImageRenderer can't draw those.
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: panel), styleMask: [.borderless],
+                                  backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            let host = NSHostingView(rootView: view)
+            host.frame = NSRect(origin: .zero, size: panel)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            // Let lists, previews and the first layout pass settle.
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            host.layoutSubtreeIfNeeded()
+            let scale: CGFloat = 2
+            if let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(panel.width * scale), pixelsHigh: Int(panel.height * scale),
+                                          bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                          colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) {
+                rep.size = panel
+                host.cacheDisplay(in: host.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+                }
             }
         }
     }

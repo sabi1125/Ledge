@@ -36,6 +36,8 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 [[ -n "$(git status --porcelain 2>/dev/null)" ]] && COMMIT="$COMMIT+"
 /usr/libexec/PlistBuddy -c "Add :LedgeCommit string $COMMIT" "$APP/Contents/Info.plist"
+# And where the source is, so "Check for updates" finds it wherever the project was cloned.
+/usr/libexec/PlistBuddy -c "Add :LedgeSource string $PWD" "$APP/Contents/Info.plist"
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp build/MediaBridge.dylib "$APP/Contents/Resources/MediaBridge.dylib"
 cp Bridge/media-bridge.pl "$APP/Contents/Resources/media-bridge.pl"

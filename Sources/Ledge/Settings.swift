@@ -55,7 +55,7 @@ enum Pref {
             showBattery: true,
             meetingAlerts: true,
             openOnHover: true,
-            hideMenuBarIcons: true,
+            hideMenuBarIcons: false,
             showOnOtherDisplays: true,
             pageCalendar: true,
             pageTimer: true,
