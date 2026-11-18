@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2</string>
+	<string>1.3</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
@@ -28,13 +28,13 @@
 	<string>Ledge shows your upcoming events in the notch.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Ledge shows your upcoming events in the notch.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 sabir. MIT License.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Ledge shows your to-dos in the notch and adds new ones to Reminders.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Ledge shows your to-dos in the notch and adds new ones to Reminders.</string>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<key>NSHumanReadableCopyright</key>
-	<string>Personal build. Not for distribution.</string>
 </dict>
 </plist>
