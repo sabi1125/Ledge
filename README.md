@@ -1,6 +1,6 @@
 # Ledge
 
-A Dynamic Island for your Mac's notch. Ledge turns the notch on a MacBook (and a small pill on external displays) into a live strip for music, meetings, timers and indicators, and opens into a panel for your calendar, to-dos and notes.
+A Dynamic Island for your Mac's notch. Ledge turns the notch on a MacBook (or a small pill on Macs and displays without one) into a live strip for music, meetings, timers and indicators, and opens into a panel for your calendar, to-dos and notes.
 
 <p align="center"><img src="docs/images/music.png" width="640" alt="The open island on the Music page: album art, song title, a progress bar and playback controls"></p>
 
@@ -74,8 +74,12 @@ Hold **⌥** and press **Tab** (or set any shortcut, ⌘Tab included) and every 
 
 ## Requirements
 
-- A Mac with Apple silicon and macOS 15 or later. It works best on a MacBook with a notch; other screens get the floating pill.
-- To build it: Xcode with Swift 6. Ledge is built and tested with Xcode 27 (Swift 6.4) on macOS 27.
+- A Mac with Apple silicon and macOS 15 or later:
+  - **MacBooks with a notch** (MacBook Pro 14" and 16", MacBook Air M2 and later) get the island in the notch.
+  - **Other Apple silicon Macs** (MacBook Air M1, 13" MacBook Pro, iMac, Mac mini, Mac Studio) and **external displays** get the floating pill, with the same features.
+  - Intel Macs and macOS 14 or older aren't supported.
+- To build it: Xcode or the Command Line Tools, with Swift 6.
+- So far Ledge has been tested on a MacBook Pro with a notch and an external display, on macOS 27, built with Xcode 27 (Swift 6.4). If you run it on another Mac or macOS version, an issue saying how it went helps a lot.
 
 There's no downloadable app yet: you build it from source, which takes a minute or two.
 
@@ -145,6 +149,15 @@ What stays where:
 ```bash
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db
 ```
+
+**The build fails with "Could not initialize build system" or "Unknown error parsing property list".** Swift's build engine couldn't start, usually because Xcode or the Command Line Tools aren't fully set up. The build script then retries with Swift's older build engine by itself. If it still fails, finish setting up Xcode and build again:
+
+```bash
+sudo xcodebuild -license accept
+xcodebuild -runFirstLaunch
+```
+
+With only the Command Line Tools, check that they're up to date in System Settings → General → Software Update. To use the older engine straight away: `LEDGE_BUILD_SYSTEM=native scripts/install.sh`.
 
 **A permission keeps getting asked for again after every update.** Your builds are signed ad hoc. Make the certificate in [Signing your builds](#signing-your-builds-recommended).
 

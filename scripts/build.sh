@@ -6,14 +6,29 @@ cd "$(dirname "$0")/.."
 APP=build/Ledge.app
 mkdir -p build
 echo "• Compiling Ledge"
-# Stop here if the build fails, so an old copy is never installed by mistake.
-if ! swift build -c release --arch arm64 > build/swift-build.log 2>&1; then
+FLAGS=(-c release --arch arm64)
+# LEDGE_BUILD_SYSTEM=native uses Swift's older build engine (see "Could not initialize build system" below).
+[[ -n "${LEDGE_BUILD_SYSTEM:-}" ]] && FLAGS+=(--build-system "$LEDGE_BUILD_SYSTEM")
+failed() {
   grep -E "error" build/swift-build.log | head -20
   echo "✗ Build failed (see build/swift-build.log)"
   exit 1
+}
+# Stop here if the build fails, so an old copy is never installed by mistake.
+if ! swift build "${FLAGS[@]}" > build/swift-build.log 2>&1; then
+  # Swift Build (the default engine) can fail to start on a Mac whose Xcode or Command Line
+  # Tools aren't fully set up ("Unknown error parsing property list"). The older engine
+  # usually still works, so try it once.
+  if [[ -z "${LEDGE_BUILD_SYSTEM:-}" ]] && grep -q "Could not initialize build system" build/swift-build.log; then
+    echo "  (Swift Build couldn't start on this Mac; trying Swift's older build engine)"
+    FLAGS+=(--build-system native)
+    swift build "${FLAGS[@]}" > build/swift-build.log 2>&1 || failed
+  else
+    failed
+  fi
 fi
-grep -E "warning: " build/swift-build.log | head -10 || true
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/Ledge"
+grep -E "warning: " build/swift-build.log | grep -v "build-system native' has been deprecated" | head -10 || true
+BIN="$(swift build "${FLAGS[@]}" --show-bin-path 2>/dev/null)/Ledge"
 
 echo "• Compiling media bridge"
 mkdir -p build
