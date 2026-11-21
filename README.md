@@ -78,7 +78,7 @@ Hold **⌥** and press **Tab** (or set any shortcut, ⌘Tab included) and every 
   - **MacBooks with a notch** (MacBook Pro 14" and 16", MacBook Air M2 and later) get the island in the notch.
   - **Other Apple silicon Macs** (MacBook Air M1, 13" MacBook Pro, iMac, Mac mini, Mac Studio) and **external displays** get the floating pill, with the same features.
   - Intel Macs and macOS 14 or older aren't supported.
-- To build it: Xcode or the Command Line Tools, with Swift 6.
+- To build it: **Xcode** (free on the App Store), opened once so it finishes setting up. The Command Line Tools alone can't build it, because SwiftUI's macros come with Xcode.
 - So far Ledge has been tested on a MacBook Pro with a notch and an external display, on macOS 27, built with Xcode 27 (Swift 6.4). If you run it on another Mac or macOS version, an issue saying how it went helps a lot.
 
 There's no downloadable app yet: you build it from source, which takes a minute or two.
@@ -150,6 +150,8 @@ What stays where:
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db
 ```
 
+**The build fails with "plugin for module 'SwiftUIMacros' not found", or says this Mac can't build SwiftUI apps yet.** The Mac has the Command Line Tools but not Xcode. Install Xcode from the App Store, open it once, and build again. If Xcode is installed somewhere other than `/Applications`, point macOS at it with `sudo xcode-select -s /path/to/Xcode.app`.
+
 **The build fails with "Could not initialize build system" or "Unknown error parsing property list".** Swift's build engine couldn't start, usually because Xcode or the Command Line Tools aren't fully set up. The build script then retries with Swift's older build engine by itself. If it still fails, finish setting up Xcode and build again:
 
 ```bash
@@ -157,7 +159,7 @@ sudo xcodebuild -license accept
 xcodebuild -runFirstLaunch
 ```
 
-With only the Command Line Tools, check that they're up to date in System Settings → General → Software Update. To use the older engine straight away: `LEDGE_BUILD_SYSTEM=native scripts/install.sh`.
+To use the older engine straight away: `LEDGE_BUILD_SYSTEM=native scripts/install.sh`.
 
 **A permission keeps getting asked for again after every update.** Your builds are signed ad hoc. Make the certificate in [Signing your builds](#signing-your-builds-recommended).
 

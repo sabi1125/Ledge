@@ -10,7 +10,7 @@ Thanks for wanting to help. Ledge is a small project, so the process is light.
 
 ## Building
 
-You need a Mac with Apple silicon on macOS 15 or later, and Xcode with Swift 6 (Ledge is built and tested with Xcode 27 and Swift 6.4).
+You need a Mac with Apple silicon on macOS 15 or later, and Xcode with Swift 6, opened once so it finishes setting up (the Command Line Tools alone can't build SwiftUI's macros). Ledge is built and tested with Xcode 27 and Swift 6.4.
 
 ```bash
 git clone https://github.com/sabi1125/Ledge.git
