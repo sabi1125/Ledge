@@ -414,7 +414,8 @@ struct SettingsPanel: View {
                 Spacer(minLength: 6)
                 switch updater.state {
                 case .available:
-                    Button("Update") { updater.update() }.buttonStyle(PillButtonStyle(prominent: true))
+                    Button(Updater.isDownloaded ? "Download" : "Update") { updater.update() }
+                        .buttonStyle(PillButtonStyle(prominent: true))
                 case .checking, .updating:
                     ProgressView().controlSize(.small)
                 default:
@@ -436,7 +437,9 @@ struct SettingsPanel: View {
             case .idle: return nil
             case .checking: return "Checking…"
             case .upToDate: return "You have the latest version"
-            case let .available(c): return "\(c.count) \(c.count == 1 ? "change" : "changes") available"
+            case let .available(c):
+                if Updater.isDownloaded { return "\(c.first ?? "A new version") is available" }
+                return "\(c.count) \(c.count == 1 ? "change" : "changes") available"
             case .updating: return "Updating… Ledge restarts in a minute"
             case let .failed(why): return why
             }

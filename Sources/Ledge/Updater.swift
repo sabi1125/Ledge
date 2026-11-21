@@ -1,4 +1,5 @@
 import AppKit
+import LedgeCore
 
 /// "Check for updates": compares the installed Ledge with the project on GitHub, and can pull
 /// the latest version and rebuild/reinstall it (scripts/install.sh) without the terminal.
@@ -23,6 +24,17 @@ final class Updater: ObservableObject {
         return URL(fileURLWithPath: custom ?? builtFrom ?? (NSHomeDirectory() + "/Ledge"))
     }
 
+    /// A copy downloaded from GitHub Releases (made by scripts/package.sh), not built from source
+    /// here: it checks the latest release instead, and Download opens its page.
+    static var isDownloaded: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "LedgeDistribution") as? String == "download"
+    }
+    /// Where releases come from.
+    static let releasesAPI = URL(string: "https://api.github.com/repos/sabi1125/Ledge/releases/latest")!
+    static let releasesPage = URL(string: "https://github.com/sabi1125/Ledge/releases/latest")!
+    /// The newer release's page, once a check found one.
+    private(set) var downloadPage: URL?
+
     /// The saved version this copy of Ledge was built from (written by scripts/build.sh).
     static var installedCommit: String? {
         Bundle.main.object(forInfoDictionaryKey: "LedgeCommit") as? String
@@ -36,6 +48,7 @@ final class Updater: ObservableObject {
     func check() {
         guard state != .checking, state != .updating else { return }
         state = .checking
+        if Self.isDownloaded { checkReleases(); return }
         let folder = folder
         // A build with unsaved changes ("+") already has everything up to the project's current version.
         let raw = Self.installedCommit
@@ -61,9 +74,39 @@ final class Updater: ObservableObject {
         return changes.isEmpty ? .upToDate : .available(changes: changes)
     }
 
-    /// Pulls the latest version, then rebuilds and reinstalls Ledge, which restarts it.
+    /// A downloaded copy: asks GitHub for the latest release and compares version numbers.
+    private func checkReleases() {
+        let installed = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        var request = URLRequest(url: Self.releasesAPI, timeoutInterval: 15)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let release = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let tag = release?["tag_name"] as? String
+            let page = (release?["html_url"] as? String).flatMap(URL.init(string:))
+            DispatchQueue.main.async {
+                guard error == nil, status == 200, let tag else {
+                    self.state = .failed("Couldn't reach GitHub.")
+                    return
+                }
+                if Version.isNewer(tag, than: installed) {
+                    self.downloadPage = page ?? Self.releasesPage
+                    self.state = .available(changes: ["Ledge \(tag.hasPrefix("v") ? String(tag.dropFirst()) : tag)"])
+                } else {
+                    self.state = .upToDate
+                }
+            }
+        }.resume()
+    }
+
+    /// Pulls the latest version, then rebuilds and reinstalls Ledge, which restarts it. A downloaded
+    /// copy opens the new release's page instead, to download it there.
     func update() {
         guard state != .updating else { return }
+        if Self.isDownloaded {
+            NSWorkspace.shared.open(downloadPage ?? Self.releasesPage)
+            return
+        }
         state = .updating
         let folder = folder
         Task.detached {

@@ -34,6 +34,7 @@ scripts/install.sh
 - Run `swift test` before you push, and add tests for logic in `LedgeCore`.
 - Check how it looks: `.build/debug/Ledge --snapshot DIR` draws every island state to images with sample data.
 - Write comments and user-facing text in plain, short sentences.
+- Releases: bump the version in `Resources/Info.plist`, commit, tag it (`v1.2.3`), run `scripts/package.sh`, and attach `build/Ledge-1.2.3.dmg` to the GitHub release.
 - Ledge uses some private macOS functions (listed in `Sources/Ledge/PrivateAPIs.swift`). If you add one, add it to that list and make the feature fall back cleanly when it's missing.
 
 By contributing, you agree that your contributions are licensed under the MIT License.

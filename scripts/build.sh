@@ -74,13 +74,22 @@ echo "• Assembling Ledge.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Ledge"
+# Releases leave out debugging symbols, which hold the build's folder paths (your user name
+# among them), and are a third of the size.
+[[ -n "${LEDGE_RELEASE:-}" ]] && strip -S -x "$APP/Contents/MacOS/Ledge"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Record which saved version this build came from ("+" means it has unsaved changes too).
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 [[ -n "$(git status --porcelain 2>/dev/null)" ]] && COMMIT="$COMMIT+"
 /usr/libexec/PlistBuddy -c "Add :LedgeCommit string $COMMIT" "$APP/Contents/Info.plist"
-# And where the source is, so "Check for updates" finds it wherever the project was cloned.
-/usr/libexec/PlistBuddy -c "Add :LedgeSource string $PWD" "$APP/Contents/Info.plist"
+if [[ -n "${LEDGE_RELEASE:-}" ]]; then
+  # A copy for GitHub Releases (scripts/package.sh): no source folder (it's someone else's Mac),
+  # and "Check for updates" looks at the latest release instead of rebuilding.
+  /usr/libexec/PlistBuddy -c "Add :LedgeDistribution string download" "$APP/Contents/Info.plist"
+else
+  # Where the source is, so "Check for updates" finds it wherever the project was cloned.
+  /usr/libexec/PlistBuddy -c "Add :LedgeSource string $PWD" "$APP/Contents/Info.plist"
+fi
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp build/MediaBridge.dylib "$APP/Contents/Resources/MediaBridge.dylib"
 cp Bridge/media-bridge.pl "$APP/Contents/Resources/media-bridge.pl"
@@ -89,7 +98,10 @@ cp Bridge/media-bridge.pl "$APP/Contents/Resources/media-bridge.pl"
 # macOS sees every build as the same app and keeps its permissions (Accessibility).
 # Without it, fall back to an ad-hoc signature (permissions then reset on every build).
 IDENTITY="Ledge Local Signing"
-if ! security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+if [[ -n "${LEDGE_RELEASE:-}" ]]; then
+  # Releases are signed ad hoc: a personal certificate means nothing on other Macs.
+  IDENTITY="-"
+elif ! security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
   echo "  (no '$IDENTITY' certificate found; signing ad-hoc)"
   IDENTITY="-"
 fi

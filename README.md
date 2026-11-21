@@ -81,9 +81,22 @@ Hold **⌥** and press **Tab** (or set any shortcut, ⌘Tab included) and every 
 - To build it: **Xcode** (free on the App Store), opened once so it finishes setting up. The Command Line Tools alone can't build it, because SwiftUI's macros come with Xcode.
 - So far Ledge has been tested on a MacBook Pro with a notch and an external display, on macOS 27, built with Xcode 27 (Swift 6.4). If you run it on another Mac or macOS version, an issue saying how it went helps a lot.
 
-There's no downloadable app yet: you build it from source, which takes a minute or two.
 
 ## Install
+
+### Download
+
+1. Download **Ledge-x.y.z.dmg** from the [latest release](https://github.com/sabi1125/Ledge/releases/latest), open it, and drag **Ledge** onto **Applications**.
+2. Open Ledge from Applications. macOS says it can't verify the app and won't open it, because Ledge isn't notarized by Apple (that needs a paid Apple Developer ID). Click **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down to the message about Ledge, and click **Open Anyway**. Confirm with your password or Touch ID. You only do this once per version.
+
+Ledge then asks for the permissions it needs (see below), and opens at login (switch that off with **Open at login** in settings → General). To **update**, use **Check for updates** in settings → General: it tells you when there's a new release, and **Download** opens its page.
+
+Each downloaded version is signed ad hoc, so macOS treats it as a new app: after updating, you may need to switch Ledge off and on again in Privacy & Security → Accessibility (and Screen Recording).
+
+### Build from source
+
+You need **Xcode** (see [Requirements](#requirements)).
 
 ```bash
 git clone https://github.com/sabi1125/Ledge.git
@@ -91,9 +104,7 @@ cd Ledge
 scripts/install.sh
 ```
 
-`install.sh` builds a release copy, puts it in `/Applications`, and opens it. Ledge then asks for the permissions it needs (see below), and opens at login (switch that off with **Open at login** in settings → General).
-
-To **update**, use **Check for updates** in settings → General, which pulls the latest version and reinstalls it, or run `scripts/install.sh` again.
+`install.sh` builds Ledge, puts it in `/Applications`, and opens it; a first build takes a few minutes. To **update**, use **Check for updates** in settings → General, which pulls the latest version and reinstalls it, or run `scripts/install.sh` again.
 
 ### Signing your builds (recommended)
 
@@ -119,7 +130,7 @@ Ledge asks only for what a feature needs, and each feature works without the oth
 
 What stays where:
 
-- Ledge has no servers, accounts or analytics. The only network request it makes itself is `git fetch` when you check for updates.
+- Ledge has no servers, accounts or analytics. The only network request it makes itself is when you click **Check for updates**: one request to GitHub for the latest release (downloaded copies), or `git fetch` (copies built from source).
 - Window previews are kept in memory and never saved to disk.
 - The log (`~/Library/Logs/Ledge.log`) records problems only, unless you turn on verbose logging. Remove titles before sharing it, since it can include window, song or event names.
 
@@ -161,7 +172,15 @@ xcodebuild -runFirstLaunch
 
 To use the older engine straight away: `LEDGE_BUILD_SYSTEM=native scripts/install.sh`.
 
-**A permission keeps getting asked for again after every update.** Your builds are signed ad hoc. Make the certificate in [Signing your builds](#signing-your-builds-recommended).
+**macOS says Ledge can't be opened or can't be verified.** That's Gatekeeper, because Ledge isn't notarized. Follow step 3 of [Download](#download): System Settings → Privacy & Security → **Open Anyway**.
+
+**A downloaded copy shows no music, or a part of it is blocked.** If something inside Ledge is still marked as downloaded after Open Anyway, you can clear that mark for Ledge only (this is your call: it tells macOS you trust this copy):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Ledge.app
+```
+
+**A permission keeps getting asked for again after every update.** Downloaded copies and builds without a certificate are signed ad hoc, so each version looks new to macOS. If you build from source, make the certificate in [Signing your builds](#signing-your-builds-recommended).
 
 **The switcher or the volume keys don't react.** Check System Settings → Privacy & Security → Accessibility, and switch Ledge off and on again there (each ad-hoc build needs a new grant). Quit other window switchers (AltTab, BetterCmdTab…), since the first app to catch the keys wins.
 
