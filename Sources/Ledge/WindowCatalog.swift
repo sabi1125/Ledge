@@ -323,6 +323,12 @@ final class WindowCatalog {
         }
     }
 
+    /// `--snapshot`: made-up windows' icons and previews (no real windows are read).
+    func useSample(icons: [pid_t: NSImage], previews: [CGWindowID: CGImage]) {
+        self.icons.merge(icons) { $1 }
+        self.previews.merge(previews) { $1 }
+    }
+
     func icon(for pid: pid_t) -> NSImage? {
         if let cached = icons[pid] { return cached }
         let image = NSRunningApplication(processIdentifier: pid)?.icon

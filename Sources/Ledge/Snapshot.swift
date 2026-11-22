@@ -59,6 +59,8 @@ enum Snapshot {
             ("28-meeting-pill-nolink", .meeting, nil, false, .music),
             ("f10-pill-meeting-countdown", .compact, nil, true, .music),
             ("f11-pill-meeting", .meeting, nil, true, .music),
+            ("29-switcher", .switcher, nil, false, .music),
+            ("30-switcher-grid", .switcher, nil, false, .music),
             ("10-notes", .expanded, nil, true, .notes),
             ("11-notes-empty", .expanded, nil, true, .notes),
         ]
@@ -122,6 +124,7 @@ enum Snapshot {
                                       joinURL: link ? URL(string: "https://meet.google.com/abc-defg-hij") : nil,
                                       eventID: nil, phase: name.contains("countdown") ? .countdown : .alert)
             }
+            if shape == .switcher { model.showSwitcher(sampleWindows(), style: name.contains("grid") ? .grid : .strip) }
             model.forceShape(shape, hud: hud, page: page)
             model.shapeFrozen = true
 
@@ -159,6 +162,51 @@ enum Snapshot {
                 }
             }
         }
+    }
+
+    /// Made-up windows for the switcher: Apple's own apps, with drawn previews and invented titles.
+    private static func sampleWindows() -> [SwitcherWindow] {
+        let apps: [(String, String, String, NSColor)] = [
+            ("Safari", "com.apple.Safari", "Ledge · GitHub", .systemBlue),
+            ("Safari", "com.apple.Safari", "Swift documentation", .systemTeal),
+            ("Notes", "com.apple.Notes", "Trip ideas", .systemYellow),
+            ("Calendar", "com.apple.iCal", "November", .systemRed),
+            ("Music", "com.apple.Music", "Golden Hour Drive", .systemPink),
+        ]
+        var windows: [SwitcherWindow] = []
+        var icons: [pid_t: NSImage] = [:]
+        var previews: [CGWindowID: CGImage] = [:]
+        for (i, app) in apps.enumerated() {
+            let pid = pid_t(90_000 + (app.0 == "Safari" ? 0 : i))
+            let id = CGWindowID(80_000 + i)
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.1) {
+                icons[pid] = NSWorkspace.shared.icon(forFile: url.resolvingSymlinksInPath().path)
+            }
+            previews[id] = samplePreview(accent: app.3)
+            windows.append(SwitcherWindow(id: id, pid: pid, appName: app.0, title: app.2,
+                                          bounds: CGRect(x: 0, y: 0, width: 1440, height: 900), isOnScreen: true))
+        }
+        WindowCatalog.shared.useSample(icons: icons, previews: previews)
+        return windows
+    }
+
+    /// A simple drawing of a window: a title bar, a sidebar and some blocks of "content".
+    private static func samplePreview(accent: NSColor) -> CGImage? {
+        let size = NSSize(width: 480, height: 300)
+        let image = NSImage(size: size, flipped: true) { r in
+            NSColor(white: 0.97, alpha: 1).setFill(); r.fill()
+            NSColor(white: 0.9, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: r.width, height: 28).fill()
+            for (i, c) in [NSColor.systemRed, .systemYellow, .systemGreen].enumerated() {
+                c.setFill(); NSBezierPath(ovalIn: NSRect(x: 10 + CGFloat(i) * 16, y: 9, width: 10, height: 10)).fill()
+            }
+            NSColor(white: 0.93, alpha: 1).setFill(); NSRect(x: 0, y: 28, width: 120, height: r.height - 28).fill()
+            accent.withAlphaComponent(0.85).setFill(); NSBezierPath(roundedRect: NSRect(x: 140, y: 48, width: 200, height: 18), xRadius: 4, yRadius: 4).fill()
+            NSColor(white: 0.82, alpha: 1).setFill()
+            for row in 0..<5 { NSBezierPath(roundedRect: NSRect(x: 140, y: 84 + CGFloat(row) * 22, width: CGFloat(300 - row * 28), height: 10), xRadius: 3, yRadius: 3).fill() }
+            accent.withAlphaComponent(0.25).setFill(); NSBezierPath(roundedRect: NSRect(x: 140, y: 205, width: 310, height: 72), xRadius: 8, yRadius: 8).fill()
+            return true
+        }
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
 
     private static func sampleArtwork() -> NSImage {
